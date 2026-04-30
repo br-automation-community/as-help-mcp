@@ -12,19 +12,14 @@ MCP server for B&R Automation Studio help documentation search. Provides keyword
 - Auto-generated links to B&R online help (AS4/AS6)
 - HelpID lookup for context-sensitive help integration
 - Incremental reindexing — only changed pages are re-processed
-- Two-phase build: keyword search available within minutes while embeddings build in the background
 
 ## Prerequisites
 
 - B&R Automation Studio installed (with help documentation)
 - VS Code with GitHub Copilot extension
-- **For standalone binary:** Download `as-help-server.exe` from [Releases](../../releases) — no Python or Docker required
-- **For UV:** Python 3.12+ with [uv](https://docs.astral.sh/uv/)
-- **For Docker:** Docker Desktop
+- **For standalone binary:** Download `as-help-server.exe` from [Releases](../../releases) — no build tools required
+- **For building from source:** [Rust 1.85+](https://www.rust-lang.org/tools/install)
 - **Optional** (for hybrid search): An OpenAI-compatible embedding API (e.g., [Ollama](https://ollama.com/) with `nomic-embed-text`)
-
-## Demo
-https://github.com/user-attachments/assets/b4df6bc7-ed7c-471f-93b8-db84b0110ac3
 
 ## Quick Start (VS Code)
 
@@ -32,7 +27,7 @@ Add to `.vscode/mcp.json` in your workspace:
 
 ### Option 1: Standalone Binary (Recommended)
 
-No Python, no Docker — just download the `.exe` from [Releases](../../releases) and place it in `%APPDATA%\as-help-mcp\`.
+Download the `.exe` from [Releases](../../releases) and place it in `%APPDATA%\as-help-mcp\`.
 
 ```json
 {
@@ -58,49 +53,28 @@ Update `--help-root` to match your AS installation:
 - **AS 4.x:** `C:\\BRAutomation\\AS412\\Help-en\\Data`
 - **AS 6.x:** `C:\\Program Files (x86)\\BRAutomation\\AS6\\Help-en\\Data`
 
-### Option 2: Docker
+### Option 2: Build from Source
 
-```json
-{
-  "servers": {
-    "as-help": {
-      "command": "docker",
-      "args": [
-        "run", "--rm", "-i",
-        "-v", "C:\\Program Files (x86)\\BRAutomation\\AS6\\Help-en\\Data:/data/help:ro",
-        "-v", "ashelp-data:/data/db",
-        "-e", "AS_HELP_VERSION=6",
-        "-e", "AS_HELP_FORCE_REBUILD=false",
-        "ghcr.io/brdk-public/as-help-mcp:latest"
-      ]
-    }
-  }
-}
+```bash
+git clone <repository-url>
+cd as-help-mcp
+cargo build --release
 ```
 
-Update the volume path to match your AS installation:
-- **AS 4.x:** `C:\\BRAutomation\\AS412\\Help-en\\Data:/data/help:ro`
-- **AS 6.x:** `C:\\Program Files (x86)\\BRAutomation\\AS6\\Help-en\\Data:/data/help:ro`
-- **AS 6.x in WSL:** `/mnt/c/Program Files (x86)/BRAutomation/AS6/Help-en/Data:/data/help:ro`
-
-### Option 3: UV (Local Development)
+The binary is at `target/release/as-help-server.exe`.
 
 ```json
 {
   "servers": {
     "as-help": {
-      "command": "uv",
+      "command": "C:\\path\\to\\as-help-mcp\\target\\release\\as-help-server.exe",
       "args": [
-        "run",
-        "--directory",
-        "/path/to/as-help-mcp",
-        "as-help-server",
         "--help-root",
         "C:\\Program Files (x86)\\BRAutomation\\AS6\\Help-en\\Data",
         "--db-path",
-        "..\\data\\as6\\.ashelp_lance",
+        "C:\\path\\to\\data\\.ashelp_lance",
         "--metadata-dir",
-        "..\\data\\as6\\.ashelp_metadata",
+        "C:\\path\\to\\data\\.ashelp_metadata",
         "--as-version",
         "6"
       ]
@@ -109,13 +83,11 @@ Update the volume path to match your AS installation:
 }
 ```
 
-Update `--directory` to point to your cloned repository and adjust paths as needed.
-
 ---
 
 Restart VS Code, then test in Copilot Chat: *"Search AS help for mapp Motion"*
 
-**First run takes 2-3 minutes** to build the keyword search index. With embeddings enabled, a full hybrid build takes 15-20 minutes (keyword search is available immediately while embeddings build in the background). Subsequent starts are instant (~3s).
+**First run takes 2-3 minutes** to build the keyword search index. Subsequent starts are instant (~3s).
 
 ---
 
@@ -158,7 +130,7 @@ ollama pull nomic-embed-text
 }
 ```
 
-Any OpenAI-compatible endpoint works — OpenAI, Azure OpenAI, GitHub Models, LiteLLM, etc. Just update the endpoint, key, model, and dimensions accordingly.
+Any OpenAI-compatible endpoint works — OpenAI, Azure OpenAI, GitHub Models, LiteLLM, etc.
 
 ### How Hybrid Search Works
 
@@ -173,39 +145,13 @@ When embeddings are enabled, the server uses **Reciprocal Rank Fusion (RRF)** to
 
 **Query-type detection** automatically selects weights: identifier queries (e.g., `MC_MoveAbsolute`, `X20DI9371`) shift toward FTS + title match; natural language queries favor vector similarity.
 
-For a deep dive into the RAG architecture — chunking strategy, two-phase build, RRF fusion, embedding model choice, and alternatives considered — see **[RAG.md](RAG.md)**.
+For a deep dive into the RAG architecture, see **[RAG.md](RAG.md)**.
 
 ---
 
-## Local Development Setup
+## CLI Arguments
 
-### Option 1: UV (Recommended)
-
-```bash
-# Clone and install
-git clone <repository-url>
-cd as-help-mcp
-uv sync --extra test --extra dev
-
-# Run server with command line arguments (precedence over .env)
-uv run as-help-server --help-root "C:\BRAutomation\AS412\Help-en\Data" --db-path "data\.ashelp_lance" --metadata-dir "data\.ashelp_metadata"
-
-# Or use relative paths (automatically resolved)
-uv run as-help-server --db-path ./data/lance_index --metadata-dir ./data
-```
-
-### Option 2: Environment Variables (.env)
-
-You can also create a `.env` file in the root directory. Command-line arguments will override these values if provided.
-
-```bash
-AS_HELP_ROOT=C:\Program Files (x86)\BRAutomation\AS6\Help-en\Data
-AS_HELP_VERSION=6
-```
-
-### CLI Arguments
-
-Run `uv run as-help-server --help` for full details.
+Run `as-help-server --help` for full details.
 
 | Argument | Env Var Equivalent | Description |
 |----------|--------------------|-------------|
@@ -229,38 +175,35 @@ These are only needed when `--create-embeddings true` is set:
 | `EMBEDDING_BATCH_SIZE` | `100` | Texts per API call |
 | `EMBEDDING_MAX_CHARS` | `8000` | Truncate input texts to this length |
 
-### Option 3: Docker Compose
+---
+
+## Development
+
+### Building
 
 ```bash
-# Local build
-docker compose build
-
-# Run with your help files mounted
-docker compose run --rm \
-  -v "C:\Program Files (x86)\BRAutomation\AS6\Help-en\Data:/data/help:ro" \
-  as-help-local
+cargo build          # Debug build
+cargo build --release  # Optimized release build
 ```
 
-### Testing with MCP Inspector
-
-The MCP Inspector provides a web UI for testing tools and prompts:
+### Testing
 
 ```bash
-# With UV
-uv run mcp dev src/server.py
-
-# Opens browser at http://localhost:5173
+cargo test
 ```
 
-Note: On Windows, use VS Code's Run and Debug panel instead (stdio transport issues with Inspector).
+### Project Structure
 
-### VS Code Debugging
-
-Use the launch configurations in `.vscode/launch.json`:
-
-1. **Rebuild BR Help Index** - First run to build index
-2. **Run BR Help MCP Server** - Normal server startup
-3. **Test BR Help Indexer** - Quick XML parse test
+```
+src/
+  main.rs           # Entry point, transport setup (stdio + StreamableHTTP)
+  server.rs         # FastMCP server, tool/prompt handlers
+  indexer.rs        # XML parsing, HTML text extraction, breadcrumbs
+  search_engine.rs  # LanceDB FTS + hybrid search with RRF
+  embeddings.rs     # Optional API-based embedding service
+  config.rs         # CLI args + env var configuration
+  models.rs         # Shared data types
+```
 
 ---
 
@@ -270,10 +213,9 @@ Use the launch configurations in `.vscode/launch.json`:
 |-----------|------|-------|
 | XML parse | ~2s | 58K+ pages in-memory |
 | First index build (FTS-only) | ~2-3 min | Parallel HTML extraction + FTS indexing |
-| First index build (hybrid) | 15-20 min | + embedding via API (keyword search available immediately) |
+| First index build (hybrid) | 15-20 min | + embedding via API |
 | Subsequent startup | ~3s | Load existing index |
 | Search query | 10-50ms | RRF hybrid or FTS keyword |
-| Memory usage | 10-30MB | Runtime after index load |
 
 ---
 
@@ -325,3 +267,6 @@ Use the launch configurations in `.vscode/launch.json`:
 }
 ```
 
+## License
+
+MIT

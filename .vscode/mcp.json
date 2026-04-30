@@ -1,6 +1,5 @@
 {
   "servers": {
-    // Option 1: Standalone binary (.exe) — uses %APPDATA%\as-help-mcp
     "as-help-exe": {
       "command": "${env:APPDATA}\\as-help-mcp\\as-help-server.exe",
       "args": [
@@ -11,86 +10,16 @@
         "--metadata-dir",
         "${env:APPDATA}\\as-help-mcp\\data\\as6\\.ashelp_metadata",
         "--as-version",
-        "6",
-        "--force-rebuild",
-        "false",
-        "--create-embeddings",
-        "false"
+        "6"
       ],
-      // Optional: only needed when --create-embeddings is true
       "env": {
         "EMBEDDING_API_ENDPOINT": "http://localhost:11434",
         "EMBEDDING_API_KEY": "ollama",
         "EMBEDDING_MODEL": "nomic-embed-text",
         "EMBEDDING_DIMENSIONS": "768",
         "EMBEDDING_BATCH_SIZE": "200",
-        "EMBEDDING_MAX_CHARS": "4000",
-        "EMBEDDING_MAX_WORKERS": "4"
+        "EMBEDDING_MAX_CHARS": "4000"
       }
-    },
-    // Option 2: UV (local development)
-    "as-help-mcp-uv": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        "${workspaceFolder}",
-        "as-help-server",
-        "--help-root",
-        "C:\\Program Files (x86)\\BRAutomation\\AS6\\Help-en\\Data",
-        "--db-path",
-        "..\\data\\as6\\.ashelp_lance",
-        "--metadata-dir",
-        "..\\data\\as6\\.ashelp_metadata",
-        "--as-version",
-        "6",
-        "--force-rebuild",
-        "false",
-        "--create-embeddings",
-        "false"
-      ],
-      // Optional: only needed when --create-embeddings is true
-      "env": {
-        "EMBEDDING_API_ENDPOINT": "http://localhost:11434",
-        "EMBEDDING_API_KEY": "ollama",
-        "EMBEDDING_MODEL": "nomic-embed-text",
-        "EMBEDDING_DIMENSIONS": "768",
-        "EMBEDDING_BATCH_SIZE": "50",
-        "EMBEDDING_MAX_CHARS": "4000",
-        "EMBEDDING_MAX_WORKERS": "4"
-      }
-    },
-    // Option 3: Docker Compose (local build)
-    "as-help-local": {
-      "command": "docker",
-      "args": [
-        "compose",
-        "run", "--rm", "-T",
-        "-v", "/mnt/c/Program Files (x86)/BRAutomation/AS6/Help-en/Data:/data/help:ro",
-        "-e", "AS_HELP_FORCE_REBUILD=false",
-        "-e", "AS_HELP_VERSION=6",
-        "-e", "CREATE_EMBEDDINGS=false",
-        // Optional: only needed when CREATE_EMBEDDINGS=true
-        "-e", "EMBEDDING_API_ENDPOINT=http://host.docker.internal:11434",
-        "-e", "EMBEDDING_API_KEY=ollama",
-        "-e", "EMBEDDING_MODEL=nomic-embed-text",
-        "-e", "EMBEDDING_DIMENSIONS=768",
-        "-e", "EMBEDDING_BATCH_SIZE=50",
-        "-e", "EMBEDDING_MAX_CHARS=4000",
-        "as-help-local"
-      ]
-    },
-    // Option 4: Docker (production image from GitHub Container Registry)
-    "as-help-prod": {
-      "command": "docker",
-      "args": [
-        "run", "--rm", "-i",
-        "-v", "/mnt/c/Program Files (x86)/BRAutomation/AS6/Help-en/Data:/data/help:ro",
-        "-v", "ashelp-data:/data/db",
-        "-e", "AS_HELP_FORCE_REBUILD=false",
-        "-e", "AS_HELP_VERSION=6",
-        "ghcr.io/brdk-public/as-help-mcp:latest"
-      ]
     }
   }
 }

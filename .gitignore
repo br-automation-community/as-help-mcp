@@ -1,45 +1,5 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual environments
-.venv/
-venv/
-ENV/
-env/
-
-# Rust
-rs/target/
-rs/*.txt
-
-# MCP specific
-help_index/
-*.index
-*.db
-*.db-shm
-*.db-wal
-.ashelp_search.db
-.ashelp_lance/
-.ashelp_metadata/
-mcp_startup.log
+# Rust build output
+/target/
 
 # Environment
 .env
@@ -56,27 +16,7 @@ mcp_startup.log
 Thumbs.db
 *.Zone.Identifier
 
-# Logs
+# MCP / LanceDB index data
+.ashelp_lance/
+.ashelp_metadata/
 *.log
-
-# Testing
-.coverage
-htmlcov/
-.pytest_cache/
-
-# Linting / type checking
-.mypy_cache/
-.ruff_cache/
-
-# PyInstaller
-*.spec
-
-# Temp/debug files
-mcp_stderr.txt
-mcp_stdout.txt
-empty_stdin.txt
-test_init.txt
-server_test.log
-
-# Pre-exported model cache for Docker builds (see prepare_model.py)
-.model_cache/
