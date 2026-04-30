@@ -1,0 +1,72 @@
+[package]
+name = "as-help-server"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.85"
+description = "MCP server for B&R Automation Studio help documentation search"
+authors = ["Lars Jensen", "Andreas Poulsen"]
+license = "MIT"
+readme = "README.md"
+
+[[bin]]
+name = "as-help-server"
+path = "src/main.rs"
+
+[dependencies]
+# MCP SDK
+rmcp = { version = "1.5", features = ["server", "transport-io", "transport-streamable-http-server"] }
+
+# Search / DB
+lancedb = "0.27"
+arrow-array = "57"
+arrow-schema = "57"
+
+# XML / HTML parsing
+quick-xml = "0.37"
+scraper = "0.22"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+# HTTP client (for embedding API)
+reqwest = { version = "0.12", features = ["json"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "0.8"
+
+# CLI & config
+clap = { version = "4", features = ["derive"] }
+dotenvy = "0.15"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Concurrency
+rayon = "1.10"
+
+# Utilities
+anyhow = "1"
+thiserror = "2"
+md-5 = "0.10"
+encoding_rs = "0.8"
+percent-encoding = "2"
+regex = "1"
+futures = "0.3"
+axum = "0.8"
+tower = "0.5"
+tower-service = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+wiremock = "0.6"
+tokio-test = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

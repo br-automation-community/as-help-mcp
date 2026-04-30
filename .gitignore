@@ -26,6 +26,10 @@ venv/
 ENV/
 env/
 
+# Rust
+rs/target/
+rs/*.txt
+
 # MCP specific
 help_index/
 *.index
@@ -42,7 +46,6 @@ mcp_startup.log
 .env.local
 
 # IDE
-
 .idea/
 *.swp
 *.swo
@@ -58,6 +61,22 @@ Thumbs.db
 
 # Testing
 .coverage
+htmlcov/
+.pytest_cache/
+
+# Linting / type checking
+.mypy_cache/
+.ruff_cache/
+
+# PyInstaller
+*.spec
+
+# Temp/debug files
+mcp_stderr.txt
+mcp_stdout.txt
+empty_stdin.txt
+test_init.txt
+server_test.log
 
 # Pre-exported model cache for Docker builds (see prepare_model.py)
 .model_cache/
