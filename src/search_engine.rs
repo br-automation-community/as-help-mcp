@@ -924,7 +924,7 @@ impl HelpSearchEngine {
     // ------------------------------------------------------------------
 
     async fn save_metadata(&self) {
-        let metadata = serde_json::json!({
+        let mut metadata = serde_json::json!({
             "xml_hash": self.indexer.get_xml_hash(),
             "indexed_at": std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -942,6 +942,10 @@ impl HelpSearchEngine {
             },
             "page_fingerprints": self.indexer.get_page_fingerprints(),
         });
+        if let Some(ref emb) = self.embedder {
+            metadata["embedding_model"] = serde_json::Value::String(emb.model_name.clone());
+            metadata["embedding_dimensions"] = serde_json::Value::Number(emb.dimension().into());
+        }
         if let Err(e) = std::fs::write(&self.metadata_path, serde_json::to_string_pretty(&metadata).unwrap_or_default()) {
             warn!("Failed to save metadata: {}", e);
         }
