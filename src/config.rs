@@ -158,12 +158,8 @@ impl AppConfig {
         };
 
         // Transport
-        let transport_str = env_or("MCP_TRANSPORT", "stdio");
-        let transport = if transport_str == "streamable-http" {
-            Transport::StreamableHttp
-        } else {
-            Transport::Stdio
-        };
+        let transport_str = env_or("MCP_TRANSPORT", "stdio").to_lowercase();
+        let transport = parse_transport(&transport_str)?;
 
         let host = env_or("MCP_HOST", "127.0.0.1");
         let port = env_usize("MCP_PORT", 8000) as u16;
@@ -184,6 +180,22 @@ impl AppConfig {
             port,
             disable_dns_rebinding_protection,
         })
+    }
+}
+
+/// Parse and validate the transport string.
+fn parse_transport(transport_str: &str) -> anyhow::Result<Transport> {
+    match transport_str {
+        "stdio" => Ok(Transport::Stdio),
+        "streamable-http" => Ok(Transport::StreamableHttp),
+        "sse" => anyhow::bail!(
+            "SSE transport is not supported in this version. Use 'stdio' or 'streamable-http'. \
+             SSE was deprecated in favor of streamable-http in the MCP specification."
+        ),
+        other => anyhow::bail!(
+            "Unknown transport '{}'. Supported values: 'stdio', 'streamable-http'",
+            other
+        ),
     }
 }
 
@@ -213,5 +225,39 @@ impl EmbeddingConfig {
             max_chars: env_usize("EMBEDDING_MAX_CHARS", 8000),
             max_workers: env_usize("EMBEDDING_MAX_WORKERS", 4),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_transport_stdio() {
+        assert_eq!(parse_transport("stdio").unwrap(), Transport::Stdio);
+    }
+
+    #[test]
+    fn parse_transport_streamable_http() {
+        assert_eq!(
+            parse_transport("streamable-http").unwrap(),
+            Transport::StreamableHttp
+        );
+    }
+
+    #[test]
+    fn parse_transport_sse_rejected() {
+        let err = parse_transport("sse").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("SSE transport is not supported"), "{msg}");
+        assert!(msg.contains("streamable-http"), "{msg}");
+    }
+
+    #[test]
+    fn parse_transport_unknown_rejected() {
+        let err = parse_transport("websocket").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Unknown transport 'websocket'"), "{msg}");
+        assert!(msg.contains("Supported values"), "{msg}");
     }
 }
