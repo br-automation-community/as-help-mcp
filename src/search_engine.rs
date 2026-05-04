@@ -1158,6 +1158,21 @@ async fn detect_build_strategy(
         }
     }
 
+    // FTS config changed
+    let current_fts_config = serde_json::json!({
+        "stem": true,
+        "remove_stop_words": true,
+        "ascii_folding": true,
+        "with_position": false,
+        "language": "English"
+    });
+    if let Some(stored_fts) = metadata.get("fts_config") {
+        if *stored_fts != current_fts_config {
+            info!("FTS config changed — full rebuild required");
+            return BuildStrategy::Full;
+        }
+    }
+
     // XML unchanged
     let stored_hash = metadata.get("xml_hash").and_then(|v| v.as_str()).unwrap_or("");
     if stored_hash == indexer.get_xml_hash() {
