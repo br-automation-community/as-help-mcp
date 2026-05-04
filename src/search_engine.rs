@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use arrow_array::{Array, Int32Array, RecordBatch, StringArray};
@@ -47,6 +47,10 @@ const WEIGHT_BREADCRUMB_MATCH_ID: f64 = 3.0;
 /// Pages per chunk during index build.
 const BUILD_CHUNK_SIZE: usize = 5000;
 
+static IDENTIFIER_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[A-Za-z_][A-Za-z0-9_.]*$").unwrap()
+});
+
 // ---------------------------------------------------------------------------
 // Query helpers
 // ---------------------------------------------------------------------------
@@ -62,9 +66,8 @@ pub fn safe_truncate(s: &str, max_bytes: usize) -> &str {
 
 /// Detect if a query looks like a technical identifier (PascalCase, snake_case, etc.).
 fn is_identifier_query(query: &str) -> bool {
-    let re = Regex::new(r"^[A-Za-z_][A-Za-z0-9_.]*$").unwrap();
     let words: Vec<&str> = query.trim().split_whitespace().collect();
-    !words.is_empty() && words.len() <= 2 && words.iter().all(|w| re.is_match(w))
+    !words.is_empty() && words.len() <= 2 && words.iter().all(|w| IDENTIFIER_RE.is_match(w))
 }
 
 /// Sanitize a query string for FTS — strip special chars and reserved keywords.
