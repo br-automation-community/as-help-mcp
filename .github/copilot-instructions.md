@@ -17,6 +17,8 @@ This is a **Model Context Protocol (MCP) server** that provides keyword and opti
    - Uses **scraper** crate for HTML text extraction
    - Uses MD5 hash for change detection (stored in `_index_metadata.json` sidecar)
    - Two-pass parsing: structure first, then HelpID extraction
+   - **Path traversal prevention**: `safe_resolve_path()` rejects `..` components and validates canonicalized paths stay within help root
+   - Correct HelpID stack handling for self-closing XML elements (no stack corruption)
 
 2. **`embeddings.rs`** - Optional API-Based Embedding Service
    - Only used when `--create-embeddings true`
@@ -40,9 +42,13 @@ This is a **Model Context Protocol (MCP) server** that provides keyword and opti
        - Breadcrumb match (weight 2x)
      - Query-type detection shifts weights for identifiers vs natural language
    - LanceDB directory-based storage (`.ashelp_lance/`)
-   - **Query sanitization** for FTS special characters
+   - **Query sanitization** for FTS special characters and LIKE wildcard injection (`%`, `_` stripped)
+   - **UTF-8 safe string slicing**: `safe_truncate()` respects char boundaries in snippets/previews
+   - **Regex cached with `LazyLock`** for identifier detection (compiled once, reused)
    - Parallel text extraction using rayon/tokio spawn_blocking
-   - Metadata sidecar (`_index_metadata.json`) tracks XML hash, `embeddings_enabled`, and model info
+   - Metadata sidecar (`_index_metadata.json`) tracks XML hash, `embeddings_enabled`, `embedding_model`, `embedding_dimensions`, and `fts_config`
+   - **Graceful degradation**: If embedding phase fails, state remains `FtsReady` and keyword search stays available
+   - **Incremental updates** work correctly with both FTS-only and hybrid tables
 
 4. **`server.rs`** - rmcp MCP Server
    - Exposes tools: `search_help`, `get_page_by_id`, `get_page_by_help_id`, `get_breadcrumb`, `get_categories`, `browse_section`, `get_help_statistics`
@@ -58,7 +64,9 @@ This is a **Model Context Protocol (MCP) server** that provides keyword and opti
 
 6. **`main.rs`** - Entry Point & Transport
    - Stdio transport for MCP client communication
-   - StreamableHTTP transport support via axum
+   - StreamableHTTP transport support via axum with dynamic allowed hosts
+   - SSE transport explicitly rejected with helpful error message
+   - DNS rebinding protection via `MCP_DISABLE_DNS_REBINDING_PROTECTION` flag
 
 ### Data Flow
 
@@ -121,6 +129,13 @@ cargo run
 - `AS_HELP_VERSION` - AS version: `4` or `6` (for online help URL generation)
 - `AS_HELP_FORCE_REBUILD` - Set `true` to force full rebuild
 
+### Transport Variables (Optional)
+
+- `MCP_TRANSPORT` - `stdio` (default) or `streamable-http` (SSE is rejected with helpful error)
+- `MCP_HOST` - Host to bind for streamable-http (default: `127.0.0.1`)
+- `MCP_PORT` - Port for streamable-http (default: `8000`)
+- `MCP_DISABLE_DNS_REBINDING_PROTECTION` - Set `true` to allow non-loopback hosts
+
 ### Embedding Variables (Optional)
 
 - `CREATE_EMBEDDINGS` - Master switch: `true` enables API-based embeddings
@@ -140,9 +155,12 @@ The B&R XML uses shortened tags — **both formats must be handled**:
 
 ### Index Rebuild Logic
 
-1. **No change** (most starts): XML hash matches → load existing index (<3s)
-2. **Content changed**: XML hash differs → incremental or full rebuild
-3. **Mode switch**: FTS↔hybrid or model changed → full rebuild
+The `BuildStrategy` enum has three variants: `Full`, `Incremental`, `None`.
+
+1. **No change** (most starts): XML hash matches → load existing index (<3s) → `BuildStrategy::None`
+2. **Content changed**: XML hash differs → incremental or full rebuild → `BuildStrategy::Incremental` (if fingerprints available)
+3. **Mode switch**: FTS↔hybrid, embedding model changed, or FTS config changed → full rebuild → `BuildStrategy::Full`
+4. **Graceful degradation**: During two-phase hybrid build, if Phase 2 (embeddings) fails, state remains `FtsReady` and keyword search continues working
 
 ## Key Dependencies
 
@@ -179,7 +197,12 @@ Root:
 ## When Modifying Code
 
 - **Adding tools**: Add method to the `#[tool_router]` impl block in `server.rs`
-- **Changing XML parsing**: Update both tag formats in `indexer.rs` (`Section`/`S`, etc.)
-- **Search improvements**: Adjust RRF weights in `search_engine.rs`
-- **Embedding model**: Change `EMBEDDING_MODEL` env var — any OpenAI-compatible model works
+- **Changing XML parsing**: Update both tag formats in `indexer.rs` (`Section`/`S`, etc.) — handle self-closing elements correctly for HelpID stack
+- **Search improvements**: Adjust RRF weights in `search_engine.rs` — update `fts_config` in metadata if FTS tokenizer settings change
+- **String slicing**: Always use `safe_truncate()` or check `is_char_boundary()` — never slice raw byte offsets on user-facing strings
+- **Query handling**: Sanitize FTS special chars AND LIKE wildcards (`%`, `_`) in `sanitize_query()`
+- **File path handling**: Use `safe_resolve_path()` in `indexer.rs` — never construct paths from user input without traversal checks
+- **Embedding model**: Change `EMBEDDING_MODEL` env var — model name and dimensions are persisted in metadata for change detection
 - **New config options**: Add to `CliArgs` struct in `config.rs` + `AppConfig` resolution
+- **Transport changes**: Update `parse_transport()` in `config.rs` and `build_allowed_hosts()` for HTTP host validation
+- **Regex patterns**: Use `LazyLock<Regex>` for patterns used in hot paths (see `IDENTIFIER_RE`)

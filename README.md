@@ -11,7 +11,9 @@ MCP server for B&R Automation Studio help documentation search. Provides keyword
 - Category filtering and hierarchical browsing
 - Auto-generated links to B&R online help (AS4/AS6)
 - HelpID lookup for context-sensitive help integration
-- Incremental reindexing — only changed pages are re-processed
+- Incremental reindexing — only changed pages are re-processed (works with both FTS-only and hybrid tables)
+- Graceful degradation — if embedding API fails, keyword search remains available
+- Security hardened — path traversal prevention, LIKE wildcard injection protection, UTF-8 safe string handling
 
 ## Prerequisites
 
@@ -142,6 +144,7 @@ When embeddings are enabled, the server uses **Reciprocal Rank Fusion (RRF)** to
 | Content vector | 1.0 | 0.5 | Semantic similarity between query and breadcrumb+content embeddings |
 | FTS keyword | 1.5 | 3.0 | Lance native full-text search on title+breadcrumb+content |
 | Title match | 3.0 | 4.0 | Exact/substring match of query in page titles |
+| Breadcrumb match | 2.0 | 3.0 | Query terms in breadcrumb path |
 
 **Query-type detection** automatically selects weights: identifier queries (e.g., `MC_MoveAbsolute`, `X20DI9371`) shift toward FTS + title match; natural language queries favor vector similarity.
 
@@ -161,6 +164,15 @@ Run `as-help-server --help` for full details.
 | `--as-version` | `AS_HELP_VERSION` | AS version for online help (`4` or `6`) |
 | `--force-rebuild` | `AS_HELP_FORCE_REBUILD` | Force a full index rebuild |
 | `--create-embeddings` | `CREATE_EMBEDDINGS` | Enable API-based embeddings for hybrid search |
+
+### Transport Configuration (Environment Variables)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_TRANSPORT` | `stdio` | Transport mode: `stdio` or `streamable-http` (SSE is explicitly rejected with a helpful error) |
+| `MCP_HOST` | `127.0.0.1` | Host to bind for streamable-http transport |
+| `MCP_PORT` | `8000` | Port to bind for streamable-http transport |
+| `MCP_DISABLE_DNS_REBINDING_PROTECTION` | `false` | Disable DNS rebinding protection for streamable-http (allows non-loopback hosts) |
 
 ### Embedding Configuration (Environment Variables)
 
