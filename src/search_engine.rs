@@ -187,8 +187,6 @@ pub struct HelpSearchEngine {
     fts_ready_rx: watch::Receiver<bool>,
 
     metadata_path: PathBuf,
-    #[allow(dead_code)]
-    build_progress_path: PathBuf,
     build_strategy: BuildStrategy,
 }
 
@@ -213,7 +211,6 @@ impl HelpSearchEngine {
             .await?;
 
         let metadata_path = db_path.join("_index_metadata.json");
-        let build_progress_path = db_path.join("_build_progress.json");
         let embeddings_enabled = embedder.is_some();
 
         let (ready_tx, ready_rx) = watch::channel(false);
@@ -236,7 +233,7 @@ impl HelpSearchEngine {
         let strategy = if force_rebuild {
             BuildStrategy::Full
         } else {
-            detect_build_strategy(&db, &metadata_path, &build_progress_path, embeddings_enabled, embedder.as_deref(), &indexer).await
+            detect_build_strategy(&db, &metadata_path, embeddings_enabled, embedder.as_deref(), &indexer).await
         };
 
         {
@@ -256,7 +253,6 @@ impl HelpSearchEngine {
             fts_ready_tx,
             fts_ready_rx,
             metadata_path,
-            build_progress_path,
             build_strategy: strategy,
         })
     }
@@ -291,14 +287,6 @@ impl HelpSearchEngine {
                 let _ = self.fts_ready_tx.send(true);
                 info!("Performing incremental index update (keyword search available)...");
                 self.incremental_update().await
-            }
-            BuildStrategy::Resume => {
-                info!("Resuming interrupted build...");
-                if self._embeddings_enabled {
-                    self.build_index_two_phase().await
-                } else {
-                    self.build_fts_index().await
-                }
             }
             BuildStrategy::None => {
                 info!("Loading existing search index...");
@@ -1125,22 +1113,10 @@ async fn create_fts_index(table: &lancedb::Table) -> anyhow::Result<()> {
 async fn detect_build_strategy(
     db: &lancedb::Connection,
     metadata_path: &Path,
-    build_progress_path: &Path,
     embeddings_enabled: bool,
     embedder: Option<&EmbeddingService>,
     indexer: &HelpContentIndexer,
 ) -> BuildStrategy {
-    // Check for resumable build
-    if build_progress_path.exists() {
-        if let Ok(text) = std::fs::read_to_string(build_progress_path) {
-            if let Ok(progress) = serde_json::from_str::<serde_json::Value>(&text) {
-                if progress.get("xml_hash").and_then(|v| v.as_str()) == Some(&indexer.get_xml_hash()) {
-                    return BuildStrategy::Resume;
-                }
-            }
-        }
-    }
-
     // Check if table exists
     let table_exists = match db.open_table(TABLE_NAME).execute().await {
         Ok(t) => t.count_rows(None).await.unwrap_or(0) > 0,

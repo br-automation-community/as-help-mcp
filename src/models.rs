@@ -167,8 +167,6 @@ pub enum BuildStrategy {
     Full,
     /// XML changed, page fingerprints available — partial update.
     Incremental,
-    /// Interrupted build detected — resume.
-    Resume,
     /// Index up-to-date — just load.
     None,
 }
