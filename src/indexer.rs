@@ -488,13 +488,55 @@ impl HelpContentIndexer {
     // HTML text extraction
     // ------------------------------------------------------------------
 
+    /// Safely resolve a file path within help_root, preventing path traversal.
+    fn safe_resolve_path(&self, file_path: &str) -> Option<PathBuf> {
+        if file_path.is_empty() {
+            return None;
+        }
+
+        let path = Path::new(file_path);
+
+        // Reject absolute paths
+        if path.is_absolute() {
+            warn!("Rejecting absolute file path: {}", file_path);
+            return None;
+        }
+
+        // Reject paths with .. components
+        for component in path.components() {
+            if matches!(component, std::path::Component::ParentDir) {
+                warn!(
+                    "Rejecting path with parent directory traversal: {}",
+                    file_path
+                );
+                return None;
+            }
+        }
+
+        let resolved = self.help_root.join(file_path);
+
+        // Double-check via canonicalization (handles symlinks)
+        if let (Ok(canonical_root), Ok(canonical_file)) = (
+            self.help_root.canonicalize(),
+            resolved.canonicalize(),
+        ) {
+            if !canonical_file.starts_with(&canonical_root) {
+                warn!(
+                    "Path escapes help root: {} -> {}",
+                    file_path,
+                    canonical_file.display()
+                );
+                return None;
+            }
+        }
+
+        Some(resolved)
+    }
+
     /// Read raw HTML content for a page from disk (no caching).
     pub fn extract_html_content(&self, page_id: &str) -> Option<String> {
         let page = self.pages.get(page_id)?;
-        if page.file_path.is_empty() {
-            return None;
-        }
-        let html_file = self.help_root.join(&page.file_path);
+        let html_file = self.safe_resolve_path(&page.file_path)?;
         if !html_file.exists() {
             debug!("HTML file not found: {}", html_file.display());
             return None;
@@ -511,10 +553,7 @@ impl HelpContentIndexer {
 
     /// Extract plain text from HTML without caching (for bulk indexing).
     pub fn extract_plain_text_no_cache(&self, page: &HelpPage) -> Option<String> {
-        if page.file_path.is_empty() {
-            return None;
-        }
-        let html_file = self.help_root.join(&page.file_path);
+        let html_file = self.safe_resolve_path(&page.file_path)?;
         if !html_file.exists() {
             return None;
         }
@@ -983,6 +1022,69 @@ mod tests {
         assert_eq!(indexer.help_id_map.get("100"), Some(&"real".to_string()));
         assert_eq!(indexer.pages["real"].help_id, Some("100".to_string()));
         assert_eq!(indexer.pages["empty"].help_id, None);
+    }
+
+    #[test]
+    fn test_safe_resolve_rejects_parent_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let xml = r#"<?xml version="1.0"?>
+<HelpContent>
+  <Page Id="evil" Text="Evil" File="../../etc/passwd"/>
+</HelpContent>"#;
+        create_sample_xml(dir.path(), xml);
+
+        let mut indexer = HelpContentIndexer::new(dir.path(), None).unwrap();
+        indexer.parse_xml_structure().unwrap();
+
+        assert!(indexer.extract_html_content("evil").is_none());
+        let page = indexer.get_page_by_id("evil").unwrap();
+        assert!(indexer.extract_plain_text_no_cache(page).is_none());
+    }
+
+    #[test]
+    fn test_safe_resolve_rejects_absolute_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let abs_path = if cfg!(windows) {
+            "C:\\Windows\\System32\\config\\sam"
+        } else {
+            "/etc/passwd"
+        };
+        let xml = format!(
+            r#"<?xml version="1.0"?>
+<HelpContent>
+  <Page Id="abs" Text="Absolute" File="{}"/>
+</HelpContent>"#,
+            abs_path
+        );
+        create_sample_xml(dir.path(), &xml);
+
+        let mut indexer = HelpContentIndexer::new(dir.path(), None).unwrap();
+        indexer.parse_xml_structure().unwrap();
+
+        assert!(indexer.extract_html_content("abs").is_none());
+    }
+
+    #[test]
+    fn test_safe_resolve_allows_normal_relative_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let xml = r#"<?xml version="1.0"?>
+<HelpContent>
+  <Page Id="p1" Text="Test" File="hardware/x20.html"/>
+</HelpContent>"#;
+        create_sample_xml(dir.path(), xml);
+        create_sample_html(
+            dir.path(),
+            "hardware/x20.html",
+            "<html><body><p>Content</p></body></html>",
+        );
+
+        let mut indexer = HelpContentIndexer::new(dir.path(), None).unwrap();
+        indexer.parse_xml_structure().unwrap();
+
+        let html = indexer.extract_html_content("p1");
+        assert!(html.is_some());
+        let text = indexer.extract_plain_text("p1").unwrap();
+        assert!(text.contains("Content"));
     }
 
     #[test]
