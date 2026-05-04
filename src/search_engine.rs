@@ -70,7 +70,7 @@ fn is_identifier_query(query: &str) -> bool {
 /// Sanitize a query string for FTS — strip special chars and reserved keywords.
 fn sanitize_query(query: &str) -> String {
     let mut s = query.to_string();
-    for ch in "\"'*:(){}^+[]-".chars() {
+    for ch in "\"'*:(){}^+[]-/%_".chars() {
         s = s.replace(ch, " ");
     }
     let reserved: std::collections::HashSet<&str> = ["and", "or", "not", "near"].into_iter().collect();
@@ -86,7 +86,7 @@ fn generate_snippet(content: &str, query: &str) -> Option<String> {
         return None;
     }
     let mut sanitized = query.to_string();
-    for ch in "\"'*:(){}^+[]-".chars() {
+    for ch in "\"'*:(){}^+[]-/%_".chars() {
         sanitized = sanitized.replace(ch, " ");
     }
     let terms: Vec<&str> = sanitized.split_whitespace().filter(|t| t.len() >= 2).collect();
@@ -1025,7 +1025,7 @@ async fn breadcrumb_retrieval(
     where_clause: Option<&str>,
 ) -> anyhow::Result<Vec<HashMap<String, serde_json::Value>>> {
     let mut sanitized = query.to_string();
-    for ch in "\"'*:(){}^+[]-/".chars() {
+    for ch in "\"'*:(){}^+[]-/%_".chars() {
         sanitized = sanitized.replace(ch, " ");
     }
     let reserved: std::collections::HashSet<&str> = ["and", "or", "not", "near"].into_iter().collect();
@@ -1396,6 +1396,17 @@ mod tests {
         assert_eq!(sanitize_query("hello world"), "hello world");
         assert_eq!(sanitize_query("\"test\" AND (foo)"), "test foo");
         assert_eq!(sanitize_query("a"), ""); // too short
+    }
+
+    #[test]
+    fn test_sanitize_query_like_wildcards() {
+        // % and _ should be stripped to prevent LIKE wildcard injection
+        let result = sanitize_query("test%wildcard");
+        assert!(!result.contains('%'));
+        let result = sanitize_query("test_wildcard");
+        assert!(!result.contains('_'));
+        let result = sanitize_query("%_%%__");
+        assert_eq!(result, "");
     }
 
     #[test]
