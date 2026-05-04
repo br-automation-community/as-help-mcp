@@ -55,7 +55,6 @@ pub struct AppConfig {
     pub transport: Transport,
     pub host: String,
     pub port: u16,
-    #[allow(dead_code)]
     pub disable_dns_rebinding_protection: bool,
 }
 
@@ -199,6 +198,21 @@ fn parse_transport(transport_str: &str) -> anyhow::Result<Transport> {
     }
 }
 
+/// Build the list of allowed hosts for DNS rebinding protection.
+/// Always includes localhost, 127.0.0.1, and [::1]. If the configured host
+/// is not one of these, it is added as well.
+pub fn build_allowed_hosts(host: &str) -> Vec<String> {
+    let mut allowed = vec![
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
+        "::1".to_string(),
+    ];
+    if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+        allowed.push(host.to_string());
+    }
+    allowed
+}
+
 impl EmbeddingConfig {
     fn from_env() -> anyhow::Result<Self> {
         let api_endpoint = std::env::var("EMBEDDING_API_ENDPOINT")
@@ -259,5 +273,31 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("Unknown transport 'websocket'"), "{msg}");
         assert!(msg.contains("Supported values"), "{msg}");
+    }
+
+    #[test]
+    fn allowed_hosts_loopback_default() {
+        let hosts = build_allowed_hosts("127.0.0.1");
+        assert!(hosts.contains(&"localhost".to_string()));
+        assert!(hosts.contains(&"127.0.0.1".to_string()));
+        assert!(hosts.contains(&"::1".to_string()));
+        // Should not duplicate 127.0.0.1
+        assert_eq!(hosts.iter().filter(|h| *h == "127.0.0.1").count(), 1);
+    }
+
+    #[test]
+    fn allowed_hosts_custom_host_added() {
+        let hosts = build_allowed_hosts("0.0.0.0");
+        assert!(hosts.contains(&"0.0.0.0".to_string()));
+        assert!(hosts.contains(&"localhost".to_string()));
+        assert!(hosts.contains(&"127.0.0.1".to_string()));
+        assert!(hosts.contains(&"::1".to_string()));
+    }
+
+    #[test]
+    fn allowed_hosts_named_host_added() {
+        let hosts = build_allowed_hosts("myserver.example.com");
+        assert!(hosts.contains(&"myserver.example.com".to_string()));
+        assert_eq!(hosts.len(), 4);
     }
 }

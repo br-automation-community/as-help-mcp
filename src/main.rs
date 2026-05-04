@@ -133,8 +133,17 @@ async fn main() -> anyhow::Result<()> {
                 session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
             };
             let session_manager = Arc::new(LocalSessionManager::default());
-            let config_http = StreamableHttpServerConfig::default()
-                .with_allowed_hosts(vec!["localhost".to_string(), "127.0.0.1".to_string()]);
+
+            let config_http = if config.disable_dns_rebinding_protection {
+                info!("DNS rebinding protection is DISABLED");
+                StreamableHttpServerConfig::default()
+            } else {
+                let allowed_hosts = crate::config::build_allowed_hosts(&config.host);
+                info!("Allowed hosts: {:?}", allowed_hosts);
+                StreamableHttpServerConfig::default()
+                    .with_allowed_hosts(allowed_hosts)
+            };
+
             let service = StreamableHttpService::new(
                 move || Ok(handler.clone()),
                 session_manager,
