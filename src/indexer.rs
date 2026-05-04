@@ -321,7 +321,7 @@ impl HelpContentIndexer {
 
         loop {
             match xml.read_event_into(&mut buf) {
-                Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                Ok(Event::Start(ref e)) => {
                     let name = e.name();
                     let tag = std::str::from_utf8(name.as_ref()).unwrap_or("");
 
@@ -329,7 +329,6 @@ impl HelpContentIndexer {
                         "Section" | "S" | "Page" | "P" => {
                             let id = self.attr_str(e, b"Id");
                             if let Some(ref raw_id) = id {
-                                // Track duplicate encounter order to match synthetic IDs
                                 let counter = dup_counters.entry(raw_id.clone()).or_insert(0);
                                 let effective_id = if *counter == 0 {
                                     raw_id.clone()
@@ -344,6 +343,37 @@ impl HelpContentIndexer {
                         }
                         "Identifiers" | "I" => {
                             in_identifiers = true;
+                        }
+                        "HelpID" | "H" if in_identifiers => {
+                            let value = self
+                                .attr_str(e, b"Value")
+                                .or_else(|| self.attr_str(e, b"v"));
+                            if let Some(help_id) = value {
+                                if let Some(Some(page_id)) = current_page_id.last() {
+                                    if let Some(page) = self.pages.get_mut(page_id) {
+                                        page.help_id = Some(help_id.clone());
+                                    }
+                                    self.help_id_map.insert(help_id, page_id.clone());
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(Event::Empty(ref e)) => {
+                    let name = e.name();
+                    let tag = std::str::from_utf8(name.as_ref()).unwrap_or("");
+                    match tag {
+                        "Section" | "S" | "Page" | "P" => {
+                            // Self-closing: track for dup counting but do NOT push to stack
+                            let id = self.attr_str(e, b"Id");
+                            if let Some(ref raw_id) = id {
+                                let counter = dup_counters.entry(raw_id.clone()).or_insert(0);
+                                *counter += 1;
+                            }
+                        }
+                        "Identifiers" | "I" => {
+                            // Self-closing <Identifiers/> or <I/> — no-op
                         }
                         "HelpID" | "H" if in_identifiers => {
                             let value = self
@@ -910,6 +940,49 @@ mod tests {
         // Then pages alphabetically
         assert!(!children[1].is_section);
         assert_eq!(children[1].title, "Module A");
+    }
+
+    #[test]
+    fn test_helpid_not_assigned_to_self_closing_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let xml = r#"<?xml version="1.0"?>
+<HelpContent>
+  <Section Id="sec" Text="Section" File="sec.html">
+    <Page Id="pg1" Text="Page1" File="pg1.html"/>
+    <Identifiers><HelpID Value="99"/></Identifiers>
+  </Section>
+</HelpContent>"#;
+        create_sample_xml(dir.path(), xml);
+
+        let mut indexer = HelpContentIndexer::new(dir.path(), None).unwrap();
+        indexer.parse_xml_structure().unwrap();
+        indexer.extract_help_ids().unwrap();
+
+        // HelpID "99" belongs to "sec", not the self-closing "pg1"
+        assert_eq!(indexer.help_id_map.get("99"), Some(&"sec".to_string()));
+        assert_eq!(indexer.pages["sec"].help_id, Some("99".to_string()));
+    }
+
+    #[test]
+    fn test_helpid_after_self_closing_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let xml = r#"<?xml version="1.0"?>
+<HelpContent>
+  <Section Id="empty" Text="Empty" File="empty.html"/>
+  <Section Id="real" Text="Real" File="real.html">
+    <Identifiers><HelpID Value="100"/></Identifiers>
+  </Section>
+</HelpContent>"#;
+        create_sample_xml(dir.path(), xml);
+
+        let mut indexer = HelpContentIndexer::new(dir.path(), None).unwrap();
+        indexer.parse_xml_structure().unwrap();
+        indexer.extract_help_ids().unwrap();
+
+        // HelpID "100" belongs to "real", not "empty"
+        assert_eq!(indexer.help_id_map.get("100"), Some(&"real".to_string()));
+        assert_eq!(indexer.pages["real"].help_id, Some("100".to_string()));
+        assert_eq!(indexer.pages["empty"].help_id, None);
     }
 
     #[test]
