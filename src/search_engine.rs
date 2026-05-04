@@ -892,8 +892,31 @@ impl HelpSearchEngine {
                 .await?
             };
 
-            let batch = records_to_fts_batch(&records)?;
-            table.add(batch).execute().await?;
+            if self._embeddings_enabled {
+                if let Some(ref embedder) = self.embedder {
+                    let title_texts: Vec<String> = records.iter()
+                        .map(|r| format!("{} {}", r.title, r.breadcrumb_path))
+                        .collect();
+                    let content_texts: Vec<String> = records.iter()
+                        .map(|r| r.content.clone())
+                        .collect();
+
+                    let title_vecs = embedder.embed_batch(&title_texts, false).await
+                        .map_err(|e| anyhow::anyhow!("Title embedding failed: {e}"))?;
+                    let content_vecs = embedder.embed_batch(&content_texts, false).await
+                        .map_err(|e| anyhow::anyhow!("Content embedding failed: {e}"))?;
+                    let dim = embedder.dimension();
+
+                    let batch = records_to_hybrid_batch(&records, &title_vecs, &content_vecs, dim)?;
+                    table.add(batch).execute().await?;
+                } else {
+                    let batch = records_to_fts_batch(&records)?;
+                    table.add(batch).execute().await?;
+                }
+            } else {
+                let batch = records_to_fts_batch(&records)?;
+                table.add(batch).execute().await?;
+            }
             info!("Added {} rows to index", records.len());
         }
 
