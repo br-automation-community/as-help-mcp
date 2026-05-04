@@ -173,9 +173,11 @@ pub struct HelpSearchEngine {
     ready_tx: watch::Sender<bool>,
     ready_rx: watch::Receiver<bool>,
     fts_ready_tx: watch::Sender<bool>,
+    #[allow(dead_code)]
     fts_ready_rx: watch::Receiver<bool>,
 
     metadata_path: PathBuf,
+    #[allow(dead_code)]
     build_progress_path: PathBuf,
     build_strategy: BuildStrategy,
 }
@@ -322,6 +324,7 @@ impl HelpSearchEngine {
     }
 
     /// Whether FTS keyword search is available.
+    #[allow(dead_code)]
     pub fn fts_ready(&self) -> bool {
         *self.fts_ready_rx.borrow()
     }
@@ -332,6 +335,7 @@ impl HelpSearchEngine {
     }
 
     /// Wait until the index is ready.
+    #[allow(dead_code)]
     pub async fn wait_until_ready(&self) -> bool {
         let mut rx = self.ready_rx.clone();
         loop {
@@ -1246,7 +1250,6 @@ fn records_to_hybrid_batch(
     dim: usize,
 ) -> anyhow::Result<RecordBatch> {
     use arrow_array::FixedSizeListArray;
-    use arrow_array::Float32Array;
     use arrow_array::types::Float32Type;
 
     let schema = Arc::new(hybrid_schema(dim));

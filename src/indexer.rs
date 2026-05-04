@@ -39,6 +39,7 @@ pub struct CategoryEntry {
 pub struct HelpContentIndexer {
     pub help_root: PathBuf,
     xml_path: PathBuf,
+    #[allow(dead_code)]
     metadata_dir: PathBuf,
     metadata_path: PathBuf,
 
@@ -187,7 +188,6 @@ impl HelpContentIndexer {
             self.pages.len(),
             elapsed.as_secs_f64()
         );
-        info!("Found {} HelpID mappings", self.help_id_map.len());
 
         if !self.duplicate_ids.is_empty() {
             info!(
@@ -200,9 +200,6 @@ impl HelpContentIndexer {
         info!("Pre-computing breadcrumbs for all pages...");
         self.precompute_breadcrumbs();
         info!("Breadcrumb cache populated: {} entries", self.breadcrumb_cache.len());
-
-        // Save metadata
-        self.save_metadata();
 
         Ok(())
     }
@@ -604,6 +601,7 @@ impl HelpContentIndexer {
     }
 
     /// Check whether the XML has changed since the last index.
+    #[allow(dead_code)]
     pub fn needs_reindex(&self) -> bool {
         let metadata = self.load_metadata();
         match metadata {
@@ -625,6 +623,7 @@ impl HelpContentIndexer {
         }
     }
 
+    #[allow(dead_code)]
     fn load_metadata(&self) -> Option<serde_json::Value> {
         if !self.metadata_path.exists() {
             return None;
@@ -633,7 +632,7 @@ impl HelpContentIndexer {
         serde_json::from_str(&data).ok()
     }
 
-    fn save_metadata(&self) {
+    pub fn save_metadata(&self) {
         let metadata = serde_json::json!({
             "xml_hash": self.get_xml_hash(),
             "indexed_at": chrono_now_iso(),

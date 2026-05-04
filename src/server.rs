@@ -118,6 +118,7 @@ struct BrowseSectionParams {
     section_id: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, JsonSchema)]
 struct PromptTopicArg {
     topic: String,
@@ -133,6 +134,7 @@ pub struct HelpServer {
     indexer: Arc<HelpContentIndexer>,
     search_engine: Arc<HelpSearchEngine>,
     online_help_base_url: String,
+    #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
 }
 

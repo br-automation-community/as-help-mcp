@@ -55,6 +55,7 @@ pub struct AppConfig {
     pub transport: Transport,
     pub host: String,
     pub port: u16,
+    #[allow(dead_code)]
     pub disable_dns_rebinding_protection: bool,
 }
 

@@ -11,15 +11,7 @@
         "${env:APPDATA}\\as-help-mcp\\data\\as6\\.ashelp_metadata",
         "--as-version",
         "6"
-      ],
-      "env": {
-        "EMBEDDING_API_ENDPOINT": "http://localhost:11434",
-        "EMBEDDING_API_KEY": "ollama",
-        "EMBEDDING_MODEL": "nomic-embed-text",
-        "EMBEDDING_DIMENSIONS": "768",
-        "EMBEDDING_BATCH_SIZE": "200",
-        "EMBEDDING_MAX_CHARS": "4000"
-      }
+      ]
     }
   }
 }

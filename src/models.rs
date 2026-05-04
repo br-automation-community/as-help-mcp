@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Shared data types used across the server.
 
 use schemars::JsonSchema;

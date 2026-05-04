@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use crate::config::EmbeddingConfig;
 
