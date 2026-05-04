@@ -319,9 +319,17 @@ impl HelpSearchEngine {
             }
             Err(ref e) => {
                 let mut s = self.status.write().await;
-                s.state = BuildState::Error;
-                s.error = Some(e.to_string());
-                error!("Search index initialization failed: {}", e);
+                if s.state == BuildState::FtsReady {
+                    // Phase 2 failed but FTS is working — degrade gracefully
+                    warn!("Embedding phase failed, falling back to keyword-only search: {}", e);
+                    s.phase = "fts_only (embedding failed)".to_string();
+                    s.error = Some(format!("Embedding phase failed: {}. Keyword search is available.", e));
+                    let _ = self.fts_ready_tx.send(true);
+                } else {
+                    s.state = BuildState::Error;
+                    s.error = Some(e.to_string());
+                    error!("Search index initialization failed: {}", e);
+                }
             }
         }
 
