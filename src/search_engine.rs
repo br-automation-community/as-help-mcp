@@ -51,6 +51,15 @@ const BUILD_CHUNK_SIZE: usize = 5000;
 // Query helpers
 // ---------------------------------------------------------------------------
 
+/// Find the largest char boundary <= `max_bytes` in `s`.
+pub fn safe_truncate(s: &str, max_bytes: usize) -> &str {
+    let mut pos = max_bytes.min(s.len());
+    while pos > 0 && !s.is_char_boundary(pos) {
+        pos -= 1;
+    }
+    &s[..pos]
+}
+
 /// Detect if a query looks like a technical identifier (PascalCase, snake_case, etc.).
 fn is_identifier_query(query: &str) -> bool {
     let re = Regex::new(r"^[A-Za-z_][A-Za-z0-9_.]*$").unwrap();
@@ -93,17 +102,18 @@ fn generate_snippet(content: &str, query: &str) -> Option<String> {
             }
         }
         if best_pos < content.len() {
-            let start = best_pos.saturating_sub(40);
-            let end = (best_pos + 120).min(content.len());
+            let raw_start = best_pos.saturating_sub(40);
+            let start = safe_truncate(content, raw_start).len();
+            let end = safe_truncate(content, best_pos + 120).len();
             let prefix = if start > 0 { "..." } else { "" };
             let suffix = if end < content.len() { "..." } else { "" };
             return Some(format!("{prefix}{}{suffix}", &content[start..end]));
         }
     }
 
-    let end = 160.min(content.len());
-    let suffix = if content.len() > 160 { "..." } else { "" };
-    Some(format!("{}{suffix}", &content[..end]))
+    let snippet = safe_truncate(content, 160);
+    let suffix = if content.len() > snippet.len() { "..." } else { "" };
+    Some(format!("{snippet}{suffix}"))
 }
 
 /// Build a safe SQL WHERE clause for category filtering.
@@ -1358,6 +1368,49 @@ mod tests {
         let content = "This is a long text about MC_MoveAbsolute function block that does motion control.";
         let snippet = generate_snippet(content, "MC_MoveAbsolute").unwrap();
         assert!(snippet.contains("MC_MoveAbsolute"));
+    }
+
+    #[test]
+    fn test_generate_snippet_utf8_boundary() {
+        // German text with multi-byte characters (ä=2 bytes, ö=2 bytes, ü=2 bytes, ß=2 bytes)
+        let content = "Übersicht der Sicherheitstechnik mit Änderungen für Größenberechnung und Maße";
+        let snippet = generate_snippet(content, "Sicherheitstechnik").unwrap();
+        assert!(snippet.contains("Sicherheitstechnik"));
+
+        // Content with multi-byte chars near truncation boundary at 160
+        let content = "A".repeat(158) + "ä"; // 158 + 2 = 160 bytes, but 159 chars
+        let snippet = generate_snippet(&content, "nomatch").unwrap();
+        // Should not panic and should contain the full string
+        assert!(snippet.contains("ä"));
+
+        // Multi-byte right at 160 byte boundary
+        let content = "A".repeat(159) + "ä"; // 159 + 2 = 161 bytes
+        let snippet = generate_snippet(&content, "nomatch").unwrap();
+        // Should truncate safely without panicking
+        assert!(snippet.ends_with("..."));
+    }
+
+    #[test]
+    fn test_safe_truncate() {
+        // ASCII: trivial case
+        assert_eq!(safe_truncate("hello", 3), "hel");
+        assert_eq!(safe_truncate("hello", 100), "hello");
+
+        // Multi-byte: ä is 2 bytes (0xC3 0xA4)
+        let s = "aäb"; // bytes: [97, 195, 164, 98] = 4 bytes
+        assert_eq!(safe_truncate(s, 1), "a");
+        assert_eq!(safe_truncate(s, 2), "a"); // mid-ä, walks back
+        assert_eq!(safe_truncate(s, 3), "aä");
+        assert_eq!(safe_truncate(s, 4), "aäb");
+
+        // Multi-byte chars at position 99-101 (server.rs truncation scenario)
+        let s = "A".repeat(99) + "ü" + "rest"; // 99 + 2 + 4 = 105 bytes
+        let trunc = safe_truncate(&s, 100);
+        assert_eq!(trunc.len(), 99); // can't fit the ü (starts at 99, ends at 101)
+
+        let s = "A".repeat(99) + "B" + "rest";
+        let trunc = safe_truncate(&s, 100);
+        assert_eq!(trunc.len(), 100); // exact ASCII boundary
     }
 
     #[test]

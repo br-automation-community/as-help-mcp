@@ -236,7 +236,8 @@ impl HelpServer {
                     .map(|s| {
                         let trimmed = s.trim();
                         if trimmed.len() > 100 {
-                            format!("{}... [TRUNCATED - call get_page_by_id for full content]", &trimmed[..100])
+                            let safe_end = crate::search_engine::safe_truncate(trimmed, 100);
+                            format!("{}... [TRUNCATED - call get_page_by_id for full content]", safe_end)
                         } else {
                             format!("{trimmed}... [TRUNCATED - call get_page_by_id for full content]")
                         }
