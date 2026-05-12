@@ -176,7 +176,7 @@ impl EmbeddingService {
 
                 set.spawn(async move {
                     let _permit = sem.acquire().await.unwrap();
-                    let result = call_api_static(&client, &url, &model, dim, max_chars, &batch).await;
+                    let result = embed_batch_with_split(&client, &url, &model, dim, max_chars, &batch).await;
                     (idx, result)
                 });
             }
@@ -220,27 +220,8 @@ impl EmbeddingService {
     }
 
     /// Embed a single batch with binary-split fallback on context overflow.
-    fn embed_one_batch<'a>(&'a self, chunk: &'a [String]) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Vec<f32>>, EmbeddingError>> + Send + 'a>> {
-        Box::pin(async move {
-            match self.call_api(chunk).await {
-                Ok(vecs) => Ok(vecs),
-                Err(EmbeddingError::TooLarge(_)) => {
-                    if chunk.len() == 1 {
-                        warn!(
-                            "Text too large for model ({} chars) — using zero vector",
-                            chunk[0].len()
-                        );
-                        return Ok(vec![vec![0.0; self.dim]]);
-                    }
-                    let mid = chunk.len() / 2;
-                    let mut left = self.embed_one_batch(&chunk[..mid]).await?;
-                    let right = self.embed_one_batch(&chunk[mid..]).await?;
-                    left.extend(right);
-                    Ok(left)
-                }
-                Err(e) => Err(e),
-            }
-        })
+    async fn embed_one_batch(&self, chunk: &[String]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        embed_batch_with_split(&self.client, &self.url, &self.model_name, self.dim, self.max_chars, chunk).await
     }
 
     /// Single API call with retry on transient errors.
@@ -256,6 +237,38 @@ fn truncate(text: &str, max_chars: usize) -> String {
     } else {
         text.chars().take(max_chars).collect()
     }
+}
+
+/// Single batch API call with binary-split fallback on context overflow.
+/// Standalone version for use from spawned tasks without `&self`.
+fn embed_batch_with_split<'a>(
+    client: &'a reqwest::Client,
+    url: &'a str,
+    model: &'a str,
+    dim: usize,
+    max_chars: usize,
+    batch: &'a [String],
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Vec<f32>>, EmbeddingError>> + Send + 'a>> {
+    Box::pin(async move {
+        match call_api_static(client, url, model, dim, max_chars, batch).await {
+            Ok(vecs) => Ok(vecs),
+            Err(EmbeddingError::TooLarge(_)) => {
+                if batch.len() == 1 {
+                    warn!(
+                        "Text too large for model ({} chars) — using zero vector",
+                        batch[0].len()
+                    );
+                    return Ok(vec![vec![0.0; dim]]);
+                }
+                let mid = batch.len() / 2;
+                let mut left = embed_batch_with_split(client, url, model, dim, max_chars, &batch[..mid]).await?;
+                let right = embed_batch_with_split(client, url, model, dim, max_chars, &batch[mid..]).await?;
+                left.extend(right);
+                Ok(left)
+            }
+            Err(e) => Err(e),
+        }
+    })
 }
 
 /// Static helper so it can be used from spawned tasks without `&self`.

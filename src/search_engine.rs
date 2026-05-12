@@ -582,7 +582,9 @@ impl HelpSearchEngine {
         let table = self.db.open_table(TABLE_NAME).execute().await?;
         create_fts_index(&table).await?;
 
-        self.save_metadata().await;
+        // Vectors are ready only when NOT in a two-phase build (i.e. FTS-only mode).
+        // When called from build_index_two_phase, Phase 2 will overwrite this with true.
+        self.save_metadata(!self._embeddings_enabled).await;
 
         let _ = self.fts_ready_tx.send(true);
         info!("FTS search index built in {:.1}s ({total} documents)", start.elapsed().as_secs_f64());
@@ -712,7 +714,7 @@ impl HelpSearchEngine {
 
         // Swap staging → final
         self.swap_staging_table().await?;
-        self.save_metadata().await;
+        self.save_metadata(true).await;
 
         info!(
             "Phase 2 complete — full hybrid search ready in {:.1}s ({total} documents)",
@@ -826,7 +828,9 @@ impl HelpSearchEngine {
 
         if to_upsert.is_empty() && to_delete.is_empty() {
             info!("No page-level changes detected — skipping update");
-            self.save_metadata().await;
+            // Preserve the current vectors_ready state from the existing metadata.
+            let prev_vectors_ready = self.load_vectors_ready_flag();
+            self.save_metadata(prev_vectors_ready).await;
             return Ok(());
         }
 
@@ -917,7 +921,9 @@ impl HelpSearchEngine {
             s.phase = "rebuilding FTS index".to_string();
         }
         create_fts_index(&table).await?;
-        self.save_metadata().await;
+        // After an incremental update the table retains whatever columns it had
+        // before, so vectors_ready matches whether embeddings were (and remain) active.
+        self.save_metadata(self._embeddings_enabled).await;
 
         info!(
             "Incremental update complete in {:.1}s (+{} -{} ~{} pages)",
@@ -945,7 +951,11 @@ impl HelpSearchEngine {
     // Metadata
     // ------------------------------------------------------------------
 
-    async fn save_metadata(&self) {
+    /// Save index metadata. `vectors_ready` should be `true` only after Phase 2
+    /// (embeddings) successfully completes. Pass `false` after Phase 1 so that
+    /// a restart with embeddings enabled will trigger a full rebuild to complete
+    /// Phase 2 rather than treating the FTS-only table as a finished hybrid index.
+    async fn save_metadata(&self, vectors_ready: bool) {
         let mut metadata = serde_json::json!({
             "xml_hash": self.indexer.get_xml_hash(),
             "indexed_at": std::time::SystemTime::now()
@@ -955,6 +965,7 @@ impl HelpSearchEngine {
             "page_count": self.indexer.pages.len(),
             "help_id_count": self.indexer.help_id_map.len(),
             "embeddings_enabled": self._embeddings_enabled,
+            "vectors_ready": vectors_ready,
             "fts_config": {
                 "stem": true,
                 "remove_stop_words": true,
@@ -971,6 +982,18 @@ impl HelpSearchEngine {
         if let Err(e) = std::fs::write(&self.metadata_path, serde_json::to_string_pretty(&metadata).unwrap_or_default()) {
             warn!("Failed to save metadata: {}", e);
         }
+    }
+
+    fn load_vectors_ready_flag(&self) -> bool {
+        let text = match std::fs::read_to_string(&self.metadata_path) {
+            Ok(t) => t,
+            Err(_) => return false,
+        };
+        let metadata: serde_json::Value = match serde_json::from_str(&text) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+        metadata.get("vectors_ready").and_then(|v| v.as_bool()).unwrap_or(false)
     }
 }
 
@@ -1148,6 +1171,15 @@ async fn detect_build_strategy(
     if stored_embeddings != embeddings_enabled {
         info!("Embedding mode changed — full rebuild required");
         return BuildStrategy::Full;
+    }
+
+    // Embeddings enabled but Phase 2 never completed (e.g. interrupted)
+    if embeddings_enabled {
+        let vectors_ready = metadata.get("vectors_ready").and_then(|v| v.as_bool()).unwrap_or(false);
+        if !vectors_ready {
+            info!("Embeddings enabled but vectors not ready (Phase 2 incomplete) — full rebuild required");
+            return BuildStrategy::Full;
+        }
     }
 
     // Embedding model changed

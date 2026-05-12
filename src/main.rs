@@ -33,7 +33,8 @@ async fn main() -> anyhow::Result<()> {
     // Initialize tracing (logs to stderr so stdio transport stays clean)
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info,html5ever=error")),
         )
         .with_ansi(false)
         .with_writer(std::io::stderr)
