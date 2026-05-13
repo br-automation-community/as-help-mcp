@@ -70,17 +70,29 @@ fn is_identifier_query(query: &str) -> bool {
     !words.is_empty() && words.len() <= 2 && words.iter().all(|w| IDENTIFIER_RE.is_match(w))
 }
 
-/// Sanitize a query string for FTS — strip special chars and reserved keywords.
+/// Sanitize a query string for FTS — strip special chars and optionally reserved keywords.
 fn sanitize_query(query: &str) -> String {
+    sanitize_query_with_mode(query, is_identifier_query(query))
+}
+
+fn sanitize_query_with_mode(query: &str, identifier_mode: bool) -> String {
     let mut s = query.to_string();
     for ch in "\"'*:(){}^+[]-/%_".chars() {
         s = s.replace(ch, " ");
     }
-    let reserved: std::collections::HashSet<&str> = ["and", "or", "not", "near"].into_iter().collect();
-    s.split_whitespace()
-        .filter(|t| t.len() >= 2 && !reserved.contains(&t.to_lowercase().as_str()))
-        .collect::<Vec<_>>()
-        .join(" ")
+    if identifier_mode {
+        // For identifiers, only strip FTS special chars, keep all terms
+        s.split_whitespace()
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else {
+        let reserved: std::collections::HashSet<&str> = ["and", "or", "not", "near"].into_iter().collect();
+        s.split_whitespace()
+            .filter(|t| t.len() >= 2 && !reserved.contains(&t.to_lowercase().as_str()))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
 }
 
 /// Generate a text snippet (~160 chars) around the first matching query term.
@@ -429,25 +441,48 @@ impl HelpSearchEngine {
             }
         }
 
-        // Leg 4: Title match bonus
+        // Leg 4: Title match bonus (per-term matching for NL, full-string for identifiers)
         let query_lower = query.trim().to_lowercase();
-        let mut title_matches: Vec<(String, String)> = page_data
+        let query_terms: Vec<&str> = query_lower
+            .split_whitespace()
+            .filter(|t| t.len() >= 2)
+            .collect();
+        let num_query_terms = query_terms.len().max(1);
+
+        let mut title_matches: Vec<(String, f64)> = page_data
             .iter()
             .filter_map(|(pid, data)| {
                 let title = data.get("title")?.as_str()?;
-                if title.to_lowercase().contains(&query_lower) {
-                    Some((pid.clone(), title.to_string()))
+                let title_lower = title.to_lowercase();
+
+                if is_id {
+                    // For identifiers, keep full-string matching
+                    if title_lower.contains(&query_lower) {
+                        let coverage = if title_lower == query_lower { 1.0 } else { 0.8 };
+                        Some((pid.clone(), coverage))
+                    } else {
+                        None
+                    }
                 } else {
-                    None
+                    // For NL queries, per-term matching with coverage score
+                    let matched = query_terms.iter().filter(|t| title_lower.contains(**t)).count();
+                    if matched > 0 {
+                        let mut coverage = matched as f64 / num_query_terms as f64;
+                        // Bonus for exact full-query match
+                        if title_lower.contains(&query_lower) {
+                            coverage = (coverage + 1.0) / 2.0 + 0.5;
+                        }
+                        // Slight preference for shorter (tighter) titles
+                        let len_penalty = 1.0 - (title.len() as f64 / 500.0).min(0.2);
+                        Some((pid.clone(), coverage * len_penalty))
+                    } else {
+                        None
+                    }
                 }
             })
             .collect();
-        title_matches.sort_by(|a, b| {
-            let a_exact = a.1.to_lowercase() == query_lower;
-            let b_exact = b.1.to_lowercase() == query_lower;
-            b_exact.cmp(&a_exact).then_with(|| a.1.len().cmp(&b.1.len()))
-        });
-        for (rank, (pid, _)) in title_matches.iter().enumerate() {
+        title_matches.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        for (rank, (pid, _coverage)) in title_matches.iter().enumerate() {
             *rrf_scores.entry(pid.clone()).or_default() += w_title_match / (RRF_K + rank as f64 + 1.0);
         }
 
@@ -460,17 +495,43 @@ impl HelpSearchEngine {
             }
         }
 
-        // Sort by RRF score and take top `limit`
-        let mut sorted: Vec<_> = rrf_scores.iter().collect();
-        sorted.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // Apply section page demotion
+        for (pid, score) in rrf_scores.iter_mut() {
+            if let Some(data) = page_data.get(pid) {
+                let is_section = data.get("is_section").and_then(|v| v.as_i64()).unwrap_or(0) != 0;
+                if is_section {
+                    *score *= 0.75;
+                }
+            }
+        }
+
+        // Sort by RRF score and take top results
+        let mut sorted: Vec<_> = rrf_scores.into_iter().collect();
+        sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Deduplicate by file_path — keep highest-scoring entry for each HTML file
+        let mut seen_files: HashMap<String, usize> = HashMap::new();
+        let mut deduped: Vec<(String, f64)> = Vec::new();
+        for (pid, score) in sorted {
+            let file_path = page_data
+                .get(&pid)
+                .and_then(|d| d.get("file_path"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if file_path.is_empty() || !seen_files.contains_key(&file_path) {
+                seen_files.insert(file_path, deduped.len());
+                deduped.push((pid, score));
+            }
+        }
 
         let search_mode = if use_vectors { "hybrid" } else { "keyword" };
 
-        let results: Vec<HashMap<String, serde_json::Value>> = sorted
+        let results: Vec<HashMap<String, serde_json::Value>> = deduped
             .into_iter()
             .take(limit)
-            .filter_map(|(pid, &score)| {
-                let row = page_data.get(pid)?;
+            .filter_map(|(pid, score)| {
+                let row = page_data.get(&pid)?;
                 let content = row.get("content").and_then(|v| v.as_str()).unwrap_or("");
                 let snippet = generate_snippet(content, query);
 
@@ -971,7 +1032,8 @@ impl HelpSearchEngine {
                 "remove_stop_words": true,
                 "ascii_folding": true,
                 "with_position": false,
-                "language": "English"
+                "language": "English",
+                "search_text_boost": "title_3x_breadcrumb_2x"
             },
             "page_fingerprints": self.indexer.get_page_fingerprints(),
         });
@@ -1045,11 +1107,11 @@ async fn breadcrumb_retrieval(
     let reserved: std::collections::HashSet<&str> = ["and", "or", "not", "near"].into_iter().collect();
     let terms: Vec<String> = sanitized
         .split_whitespace()
-        .filter(|t| t.len() >= 3 && !reserved.contains(&t.to_lowercase().as_str()))
+        .filter(|t| t.len() >= 2 && !reserved.contains(&t.to_lowercase().as_str()))
         .map(|t| t.to_lowercase())
         .collect();
 
-    if terms.len() < 2 {
+    if terms.is_empty() {
         return Ok(Vec::new());
     }
 
@@ -1199,7 +1261,8 @@ async fn detect_build_strategy(
         "remove_stop_words": true,
         "ascii_folding": true,
         "with_position": false,
-        "language": "English"
+        "language": "English",
+        "search_text_boost": "title_3x_breadcrumb_2x"
     });
     if let Some(stored_fts) = metadata.get("fts_config") {
         if *stored_fts != current_fts_config {
@@ -1286,7 +1349,7 @@ fn records_to_fts_batch(records: &[PageRecord]) -> anyhow::Result<RecordBatch> {
     let search_texts = StringArray::from(
         records
             .iter()
-            .map(|r| format!("{} {} {}", r.title, r.breadcrumb_path, r.content))
+            .map(|r| format!("{t} {t} {t} {bc} {bc} {c}", t = r.title, bc = r.breadcrumb_path, c = r.content))
             .collect::<Vec<_>>()
             .iter()
             .map(|s| s.as_str())
@@ -1331,7 +1394,7 @@ fn records_to_hybrid_batch(
     let search_texts = StringArray::from(
         records
             .iter()
-            .map(|r| format!("{} {} {}", r.title, r.breadcrumb_path, r.content))
+            .map(|r| format!("{t} {t} {t} {bc} {bc} {c}", t = r.title, bc = r.breadcrumb_path, c = r.content))
             .collect::<Vec<_>>()
             .iter()
             .map(|s| s.as_str())
@@ -1421,7 +1484,10 @@ mod tests {
     fn test_sanitize_query() {
         assert_eq!(sanitize_query("hello world"), "hello world");
         assert_eq!(sanitize_query("\"test\" AND (foo)"), "test foo");
-        assert_eq!(sanitize_query("a"), ""); // too short
+        // Single char "a" is treated as an identifier — kept in identifier mode
+        assert_eq!(sanitize_query("a"), "a");
+        // NL-mode filtering via sanitize_query_with_mode
+        assert_eq!(sanitize_query_with_mode("a", false), "");
     }
 
     #[test]
