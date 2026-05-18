@@ -226,9 +226,6 @@ impl HelpServer {
         let search_results: Vec<serde_json::Value> = results
             .iter()
             .map(|r| {
-                let file_path = r.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
-                let online_url = self.build_online_help_url(file_path);
-
                 // Intentionally short preview to force get_page_by_id
                 let preview = r
                     .get("snippet")
@@ -237,42 +234,59 @@ impl HelpServer {
                         let trimmed = s.trim();
                         if trimmed.len() > 100 {
                             let safe_end = crate::search_engine::safe_truncate(trimmed, 100);
-                            format!("{}... [TRUNCATED - call get_page_by_id for full content]", safe_end)
+                            format!("{safe_end}...")
                         } else {
-                            format!("{trimmed}... [TRUNCATED - call get_page_by_id for full content]")
+                            format!("{trimmed}...")
                         }
                     });
 
-                serde_json::json!({
+                // Round score to 3 decimal places to save tokens
+                let score = r
+                    .get("score")
+                    .and_then(|v| v.as_f64())
+                    .map(|s| (s * 1000.0).round() / 1000.0);
+
+                // Omit empty help_id
+                let help_id = r
+                    .get("help_id")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty());
+
+                let mut entry = serde_json::json!({
                     "page_id": r.get("page_id"),
                     "title": r.get("title"),
-                    "file_path": r.get("file_path"),
-                    "online_help_url": online_url,
-                    "help_id": r.get("help_id"),
-                    "is_section": r.get("is_section"),
-                    "score": r.get("score"),
                     "breadcrumb_path": r.get("breadcrumb_path"),
                     "category": r.get("category"),
+                    "is_section": r.get("is_section"),
                     "content_preview": preview,
-                })
+                });
+
+                // Only include non-null optional fields
+                if let Some(s) = score {
+                    entry["score"] = serde_json::json!(s);
+                }
+                if let Some(hid) = help_id {
+                    entry["help_id"] = serde_json::json!(hid);
+                }
+
+                entry
             })
             .collect();
 
-        let mut status_msg: Option<String> = None;
-        if search_mode == "keyword" && self.search_engine._embeddings_enabled {
-            status_msg = Some(
-                "Semantic search is still loading — results are keyword-only. Retry later for better relevance."
-                    .to_string(),
-            );
-        }
-
-        let result = serde_json::json!({
+        let mut result = serde_json::json!({
             "query": params.query,
             "results": search_results,
             "total": search_results.len(),
             "search_mode": search_mode,
-            "status_message": status_msg,
         });
+
+        // Only include status_message when present
+        if search_mode == "keyword" && self.search_engine._embeddings_enabled {
+            result["status_message"] = serde_json::json!(
+                "Semantic search is still loading — results are keyword-only. Retry later for better relevance."
+            );
+        }
+
         Ok(CallToolResult::success(vec![Content::json(result)?]))
     }
 
