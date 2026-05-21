@@ -1,6 +1,6 @@
 {
   "servers": {
-    "as4-help": {
+    "as4-help-hybrid": {
       "command": "${env:APPDATA}\\as-help-mcp\\as-help-server.exe",
       "args": [
         "--help-root", "C:\\BRAutomation\\AS412\\Help-en\\Data",
@@ -18,24 +18,43 @@
         "EMBEDDING_MAX_CHARS": "4000"
       }
     },
-
-    "as6-help": {
+    
+    "as4-help-fts": {
       "command": "${env:APPDATA}\\as-help-mcp\\as-help-server.exe",
       "args": [
-        "--help-root", "C:\\Program Files (x86)\\BRAutomation\\AS6\\Help-en\\Data",
-        "--db-path", "${env:APPDATA}\\as-help-mcp\\data\\as6\\.ashelp_lance",
-        "--metadata-dir", "${env:APPDATA}\\as-help-mcp\\data\\as6\\.ashelp_metadata",
-        "--as-version", "6",
-        "--create-embeddings", "true"
+        "--help-root", "C:\\BRAutomation\\AS412\\Help-en\\Data",
+        "--db-path", "${env:APPDATA}\\as-help-mcp_fts\\data\\as4\\.ashelp_lance",
+        "--metadata-dir", "${env:APPDATA}\\as-help-mcp_fts\\data\\as4\\.ashelp_metadata",
+        "--as-version", "4",
+        "--create-embeddings", "false"
       ],
-      "env": {
-        "EMBEDDING_API_ENDPOINT": "http://localhost:11434",
-        "EMBEDDING_API_KEY": "ollama",
-        "EMBEDDING_MODEL": "nomic-embed-text",
-        "EMBEDDING_DIMENSIONS": "768",
-        "EMBEDDING_BATCH_SIZE": "100",
-        "EMBEDDING_MAX_CHARS": "4000"
-      }
+      // "env": {
+      //   "EMBEDDING_API_ENDPOINT": "http://localhost:11434",
+      //   "EMBEDDING_API_KEY": "ollama",
+      //   "EMBEDDING_MODEL": "nomic-embed-text",
+      //   "EMBEDDING_DIMENSIONS": "768",
+      //   "EMBEDDING_BATCH_SIZE": "100",
+      //   "EMBEDDING_MAX_CHARS": "4000"
+      // }
     }
+
+    // "as6-help": {
+    //   "command": "${env:APPDATA}\\as-help-mcp\\as-help-server.exe",
+    //   "args": [
+    //     "--help-root", "C:\\Program Files (x86)\\BRAutomation\\AS6\\Help-en\\Data",
+    //     "--db-path", "${env:APPDATA}\\as-help-mcp\\data\\as6\\.ashelp_lance",
+    //     "--metadata-dir", "${env:APPDATA}\\as-help-mcp\\data\\as6\\.ashelp_metadata",
+    //     "--as-version", "6",
+    //     "--create-embeddings", "true"
+    //   ],
+    //   "env": {
+    //     "EMBEDDING_API_ENDPOINT": "http://localhost:11434",
+    //     "EMBEDDING_API_KEY": "ollama",
+    //     "EMBEDDING_MODEL": "nomic-embed-text",
+    //     "EMBEDDING_DIMENSIONS": "768",
+    //     "EMBEDDING_BATCH_SIZE": "100",
+    //     "EMBEDDING_MAX_CHARS": "4000"
+    //   }
+    // }
   }
 }
