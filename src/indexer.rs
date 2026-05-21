@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use md5::{Digest, Md5};
 use quick_xml::events::{BytesStart, Event};
+use quick_xml::XmlVersion;
 use quick_xml::Reader;
 use tracing::{debug, error, info, warn};
 
@@ -288,7 +289,7 @@ impl HelpContentIndexer {
             .filter_map(|a| a.ok())
             .find(|a| a.key.as_ref() == name)
             .and_then(|a| {
-                a.unescape_value()
+                a.normalized_value(XmlVersion::Implicit1_0)
                     .ok()
                     .map(|v| v.to_string())
             })

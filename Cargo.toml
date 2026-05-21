@@ -2,7 +2,7 @@
 name = "as-help-server"
 version = "1.0.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.91"
 description = "MCP server for B&R Automation Studio help documentation search"
 authors = ["Lars Jensen", "Andreas Poulsen"]
 license = "MIT"
@@ -14,16 +14,16 @@ path = "src/main.rs"
 
 [dependencies]
 # MCP SDK
-rmcp = { version = "1.5", features = ["server", "transport-io", "transport-streamable-http-server"] }
+rmcp = { version = "1.7", features = ["server", "transport-io", "transport-streamable-http-server"] }
 
 # Search / DB
-lancedb = "0.27"
-arrow-array = "57"
-arrow-schema = "57"
+lancedb = "0.29"
+arrow-array = "58"
+arrow-schema = "58"
 
 # XML / HTML parsing
-quick-xml = "0.37"
-scraper = "0.22"
+quick-xml = "0.40"
+scraper = "0.27"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
