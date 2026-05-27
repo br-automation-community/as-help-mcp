@@ -44,7 +44,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install protoc
-        run: choco install protobuf -y
+        uses: arduino/setup-protoc@v3
 
       - name: Build release binary
         run: cargo build --release
