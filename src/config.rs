@@ -129,11 +129,17 @@ impl AppConfig {
         let metadata_dir = cli
             .metadata_dir
             .clone()
-            .or_else(|| std::env::var("AS_HELP_METADATA_DIR").ok().map(PathBuf::from))
+            .or_else(|| {
+                std::env::var("AS_HELP_METADATA_DIR")
+                    .ok()
+                    .map(PathBuf::from)
+            })
             .unwrap_or(default_meta);
 
         // Force rebuild
-        let force_rebuild = cli.force_rebuild.unwrap_or_else(|| env_bool("AS_HELP_FORCE_REBUILD", false));
+        let force_rebuild = cli
+            .force_rebuild
+            .unwrap_or_else(|| env_bool("AS_HELP_FORCE_REBUILD", false));
 
         // AS version
         let as_version = cli
@@ -215,14 +221,19 @@ pub fn build_allowed_hosts(host: &str) -> Vec<String> {
 
 impl EmbeddingConfig {
     fn from_env() -> anyhow::Result<Self> {
-        let api_endpoint = std::env::var("EMBEDDING_API_ENDPOINT")
-            .map_err(|_| anyhow::anyhow!("EMBEDDING_API_ENDPOINT is required when embeddings are enabled"))?;
-        let api_key = std::env::var("EMBEDDING_API_KEY")
-            .map_err(|_| anyhow::anyhow!("EMBEDDING_API_KEY is required when embeddings are enabled"))?;
-        let model = std::env::var("EMBEDDING_MODEL")
-            .map_err(|_| anyhow::anyhow!("EMBEDDING_MODEL is required when embeddings are enabled"))?;
+        let api_endpoint = std::env::var("EMBEDDING_API_ENDPOINT").map_err(|_| {
+            anyhow::anyhow!("EMBEDDING_API_ENDPOINT is required when embeddings are enabled")
+        })?;
+        let api_key = std::env::var("EMBEDDING_API_KEY").map_err(|_| {
+            anyhow::anyhow!("EMBEDDING_API_KEY is required when embeddings are enabled")
+        })?;
+        let model = std::env::var("EMBEDDING_MODEL").map_err(|_| {
+            anyhow::anyhow!("EMBEDDING_MODEL is required when embeddings are enabled")
+        })?;
         let dimensions: usize = std::env::var("EMBEDDING_DIMENSIONS")
-            .map_err(|_| anyhow::anyhow!("EMBEDDING_DIMENSIONS is required when embeddings are enabled"))?
+            .map_err(|_| {
+                anyhow::anyhow!("EMBEDDING_DIMENSIONS is required when embeddings are enabled")
+            })?
             .trim()
             .parse()
             .map_err(|_| anyhow::anyhow!("EMBEDDING_DIMENSIONS must be a positive integer"))?;

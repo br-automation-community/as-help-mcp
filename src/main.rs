@@ -57,10 +57,8 @@ async fn main() -> anyhow::Result<()> {
 
     // 1. Initialize indexer (parses XML structure)
     info!("Initializing help indexer...");
-    let mut indexer = HelpContentIndexer::new(
-        &config.help_root,
-        Some(config.metadata_dir.as_path()),
-    )?;
+    let mut indexer =
+        HelpContentIndexer::new(&config.help_root, Some(config.metadata_dir.as_path()))?;
     indexer.parse_xml_structure()?;
     indexer.extract_help_ids()?;
     indexer.save_metadata();
@@ -131,7 +129,8 @@ async fn main() -> anyhow::Result<()> {
             let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
 
             use rmcp::transport::streamable_http_server::{
-                session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
+                StreamableHttpServerConfig, StreamableHttpService,
+                session::local::LocalSessionManager,
             };
             let session_manager = Arc::new(LocalSessionManager::default());
 
@@ -141,8 +140,7 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 let allowed_hosts = crate::config::build_allowed_hosts(&config.host);
                 info!("Allowed hosts: {:?}", allowed_hosts);
-                StreamableHttpServerConfig::default()
-                    .with_allowed_hosts(allowed_hosts)
+                StreamableHttpServerConfig::default().with_allowed_hosts(allowed_hosts)
             };
 
             let service = StreamableHttpService::new(

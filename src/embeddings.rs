@@ -3,6 +3,8 @@
 //! Calls any OpenAI-compatible `/embeddings` endpoint. Only used when
 //! `CREATE_EMBEDDINGS=true`.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 use reqwest::StatusCode;
@@ -58,6 +60,9 @@ struct EmbedDatum {
     index: usize,
     embedding: Vec<f32>,
 }
+
+type EmbeddingFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Vec<Vec<f32>>, EmbeddingError>> + Send + 'a>>;
 
 impl EmbeddingService {
     /// Create from resolved config.
@@ -116,7 +121,10 @@ impl EmbeddingService {
         let truncated = truncate(text, self.max_chars);
         let texts = vec![truncated];
         let result = self.call_api(&texts).await?;
-        Ok(result.into_iter().next().unwrap_or_else(|| vec![0.0; self.dim]))
+        Ok(result
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| vec![0.0; self.dim]))
     }
 
     /// Embed a batch of texts with concurrent workers.
@@ -130,10 +138,7 @@ impl EmbeddingService {
         }
 
         let total = texts.len();
-        let truncated: Vec<String> = texts
-            .iter()
-            .map(|t| truncate(t, self.max_chars))
-            .collect();
+        let truncated: Vec<String> = texts.iter().map(|t| truncate(t, self.max_chars)).collect();
 
         // Split into batches
         let batches: Vec<Vec<String>> = truncated
@@ -141,7 +146,13 @@ impl EmbeddingService {
             .map(|chunk| {
                 chunk
                     .iter()
-                    .map(|t| if t.trim().is_empty() { " ".to_string() } else { t.clone() })
+                    .map(|t| {
+                        if t.trim().is_empty() {
+                            " ".to_string()
+                        } else {
+                            t.clone()
+                        }
+                    })
                     .collect()
             })
             .collect();
@@ -176,7 +187,8 @@ impl EmbeddingService {
 
                 set.spawn(async move {
                     let _permit = sem.acquire().await.unwrap();
-                    let result = embed_batch_with_split(&client, &url, &model, dim, max_chars, &batch).await;
+                    let result =
+                        embed_batch_with_split(&client, &url, &model, dim, max_chars, &batch).await;
                     (idx, result)
                 });
             }
@@ -201,7 +213,10 @@ impl EmbeddingService {
                     let done = ((i + 1) * self.batch_size).min(total);
                     let elapsed = start.elapsed().as_secs_f64();
                     let rate = done as f64 / elapsed;
-                    info!("  Progress: {done}/{total} ({:.0}%, {rate:.0} texts/s)", done as f64 * 100.0 / total as f64);
+                    info!(
+                        "  Progress: {done}/{total} ({:.0}%, {rate:.0} texts/s)",
+                        done as f64 * 100.0 / total as f64
+                    );
                 }
             }
         }
@@ -221,12 +236,28 @@ impl EmbeddingService {
 
     /// Embed a single batch with binary-split fallback on context overflow.
     async fn embed_one_batch(&self, chunk: &[String]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
-        embed_batch_with_split(&self.client, &self.url, &self.model_name, self.dim, self.max_chars, chunk).await
+        embed_batch_with_split(
+            &self.client,
+            &self.url,
+            &self.model_name,
+            self.dim,
+            self.max_chars,
+            chunk,
+        )
+        .await
     }
 
     /// Single API call with retry on transient errors.
     async fn call_api(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
-        call_api_static(&self.client, &self.url, &self.model_name, self.dim, self.max_chars, texts).await
+        call_api_static(
+            &self.client,
+            &self.url,
+            &self.model_name,
+            self.dim,
+            self.max_chars,
+            texts,
+        )
+        .await
     }
 }
 
@@ -248,7 +279,7 @@ fn embed_batch_with_split<'a>(
     dim: usize,
     max_chars: usize,
     batch: &'a [String],
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Vec<f32>>, EmbeddingError>> + Send + 'a>> {
+) -> EmbeddingFuture<'a> {
     Box::pin(async move {
         match call_api_static(client, url, model, dim, max_chars, batch).await {
             Ok(vecs) => Ok(vecs),
@@ -261,8 +292,12 @@ fn embed_batch_with_split<'a>(
                     return Ok(vec![vec![0.0; dim]]);
                 }
                 let mid = batch.len() / 2;
-                let mut left = embed_batch_with_split(client, url, model, dim, max_chars, &batch[..mid]).await?;
-                let right = embed_batch_with_split(client, url, model, dim, max_chars, &batch[mid..]).await?;
+                let mut left =
+                    embed_batch_with_split(client, url, model, dim, max_chars, &batch[..mid])
+                        .await?;
+                let right =
+                    embed_batch_with_split(client, url, model, dim, max_chars, &batch[mid..])
+                        .await?;
                 left.extend(right);
                 Ok(left)
             }

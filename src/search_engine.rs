@@ -12,11 +12,11 @@ use std::time::Instant;
 use arrow_array::{Array, Int32Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use futures::TryStreamExt;
-use lancedb::index::scalar::FtsIndexBuilder;
 use lancedb::index::Index;
+use lancedb::index::scalar::FtsIndexBuilder;
 use lancedb::query::{ExecutableQuery, QueryBase};
 use regex::Regex;
-use tokio::sync::{watch, RwLock};
+use tokio::sync::{RwLock, watch};
 use tracing::{error, info, warn};
 
 use crate::embeddings::EmbeddingService;
@@ -47,9 +47,8 @@ const WEIGHT_BREADCRUMB_MATCH_ID: f64 = 3.0;
 /// Pages per chunk during index build.
 const BUILD_CHUNK_SIZE: usize = 5000;
 
-static IDENTIFIER_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[A-Za-z_][A-Za-z0-9_.]*$").unwrap()
-});
+static IDENTIFIER_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_.]*$").unwrap());
 
 // ---------------------------------------------------------------------------
 // Query helpers
@@ -66,7 +65,7 @@ pub fn safe_truncate(s: &str, max_bytes: usize) -> &str {
 
 /// Detect if a query looks like a technical identifier (PascalCase, snake_case, etc.).
 fn is_identifier_query(query: &str) -> bool {
-    let words: Vec<&str> = query.trim().split_whitespace().collect();
+    let words: Vec<&str> = query.split_whitespace().collect();
     !words.is_empty() && words.len() <= 2 && words.iter().all(|w| IDENTIFIER_RE.is_match(w))
 }
 
@@ -87,7 +86,8 @@ fn sanitize_query_with_mode(query: &str, identifier_mode: bool) -> String {
             .collect::<Vec<_>>()
             .join(" ")
     } else {
-        let reserved: std::collections::HashSet<&str> = ["and", "or", "not", "near"].into_iter().collect();
+        let reserved: std::collections::HashSet<&str> =
+            ["and", "or", "not", "near"].into_iter().collect();
         s.split_whitespace()
             .filter(|t| t.len() >= 2 && !reserved.contains(&t.to_lowercase().as_str()))
             .collect::<Vec<_>>()
@@ -104,16 +104,19 @@ fn generate_snippet(content: &str, query: &str) -> Option<String> {
     for ch in "\"'*:(){}^+[]-/%_".chars() {
         sanitized = sanitized.replace(ch, " ");
     }
-    let terms: Vec<&str> = sanitized.split_whitespace().filter(|t| t.len() >= 2).collect();
+    let terms: Vec<&str> = sanitized
+        .split_whitespace()
+        .filter(|t| t.len() >= 2)
+        .collect();
 
     if !terms.is_empty() {
         let lower = content.to_lowercase();
         let mut best_pos = content.len();
         for term in &terms {
-            if let Some(pos) = lower.find(&term.to_lowercase()) {
-                if pos < best_pos {
-                    best_pos = pos;
-                }
+            if let Some(pos) = lower.find(&term.to_lowercase())
+                && pos < best_pos
+            {
+                best_pos = pos;
             }
         }
         if best_pos < content.len() {
@@ -127,7 +130,11 @@ fn generate_snippet(content: &str, query: &str) -> Option<String> {
     }
 
     let snippet = safe_truncate(content, 160);
-    let suffix = if content.len() > snippet.len() { "..." } else { "" };
+    let suffix = if content.len() > snippet.len() {
+        "..."
+    } else {
+        ""
+    };
     Some(format!("{snippet}{suffix}"))
 }
 
@@ -138,7 +145,10 @@ fn build_category_filter(category: Option<&str>) -> Option<String> {
         return None;
     }
     // Strip non-word chars for safety
-    let safe: String = cat.chars().filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '.' || *c == '-' || *c == '_').collect();
+    let safe: String = cat
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '.' || *c == '-' || *c == '_')
+        .collect();
     Some(format!("lower(category) = '{}'", safe.to_lowercase()))
 }
 
@@ -248,7 +258,14 @@ impl HelpSearchEngine {
         let strategy = if force_rebuild {
             BuildStrategy::Full
         } else {
-            detect_build_strategy(&db, &metadata_path, embeddings_enabled, embedder.as_deref(), &indexer).await
+            detect_build_strategy(
+                &db,
+                &metadata_path,
+                embeddings_enabled,
+                embedder.as_deref(),
+                &indexer,
+            )
+            .await
         };
 
         {
@@ -324,9 +341,15 @@ impl HelpSearchEngine {
                 let mut s = self.status.write().await;
                 if s.state == BuildState::FtsReady {
                     // Phase 2 failed but FTS is working — degrade gracefully
-                    warn!("Embedding phase failed, falling back to keyword-only search: {}", e);
+                    warn!(
+                        "Embedding phase failed, falling back to keyword-only search: {}",
+                        e
+                    );
                     s.phase = "fts_only (embedding failed)".to_string();
-                    s.error = Some(format!("Embedding phase failed: {}. Keyword search is available.", e));
+                    s.error = Some(format!(
+                        "Embedding phase failed: {}. Keyword search is available.",
+                        e
+                    ));
                     let _ = self.fts_ready_tx.send(true);
                 } else {
                     s.state = BuildState::Error;
@@ -393,9 +416,21 @@ impl HelpSearchEngine {
         // Choose weights based on query type
         let is_id = is_identifier_query(query);
         let (w_title_vec, w_content_vec, w_fts, w_title_match, w_breadcrumb) = if is_id {
-            (WEIGHT_TITLE_VECTOR_ID, WEIGHT_CONTENT_VECTOR_ID, WEIGHT_FTS_KEYWORD_ID, WEIGHT_TITLE_MATCH_ID, WEIGHT_BREADCRUMB_MATCH_ID)
+            (
+                WEIGHT_TITLE_VECTOR_ID,
+                WEIGHT_CONTENT_VECTOR_ID,
+                WEIGHT_FTS_KEYWORD_ID,
+                WEIGHT_TITLE_MATCH_ID,
+                WEIGHT_BREADCRUMB_MATCH_ID,
+            )
         } else {
-            (WEIGHT_TITLE_VECTOR, WEIGHT_CONTENT_VECTOR, WEIGHT_FTS_KEYWORD, WEIGHT_TITLE_MATCH, WEIGHT_BREADCRUMB_MATCH)
+            (
+                WEIGHT_TITLE_VECTOR,
+                WEIGHT_CONTENT_VECTOR,
+                WEIGHT_FTS_KEYWORD,
+                WEIGHT_TITLE_MATCH,
+                WEIGHT_BREADCRUMB_MATCH,
+            )
         };
 
         let fetch_limit = (limit * 3).min(100);
@@ -403,41 +438,70 @@ impl HelpSearchEngine {
         let mut page_data: HashMap<String, HashMap<String, serde_json::Value>> = HashMap::new();
 
         // Leg 1 + 2: Vector search (if hybrid mode is ready)
-        if use_vectors {
-            if let Some(ref embedder) = self.embedder {
-                if let Ok(query_vector) = embedder.embed_text(query).await {
-                    // Title vector search
-                    if let Ok(title_results) = vector_search(&table, &query_vector, "title_vector", fetch_limit, where_clause.as_deref()).await {
-                        for (rank, row) in title_results.iter().enumerate() {
-                            let pid = row.get("page_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                            *rrf_scores.entry(pid.clone()).or_default() += w_title_vec / (RRF_K + rank as f64 + 1.0);
-                            page_data.entry(pid).or_insert_with(|| row.clone());
-                        }
-                    }
+        if use_vectors
+            && let Some(ref embedder) = self.embedder
+            && let Ok(query_vector) = embedder.embed_text(query).await
+        {
+            // Title vector search
+            if let Ok(title_results) = vector_search(
+                &table,
+                &query_vector,
+                "title_vector",
+                fetch_limit,
+                where_clause.as_deref(),
+            )
+            .await
+            {
+                for (rank, row) in title_results.iter().enumerate() {
+                    let pid = row
+                        .get("page_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    *rrf_scores.entry(pid.clone()).or_default() +=
+                        w_title_vec / (RRF_K + rank as f64 + 1.0);
+                    page_data.entry(pid).or_insert_with(|| row.clone());
+                }
+            }
 
-                    // Content vector search
-                    if search_in_content {
-                        if let Ok(content_results) = vector_search(&table, &query_vector, "content_vector", fetch_limit, where_clause.as_deref()).await {
-                            for (rank, row) in content_results.iter().enumerate() {
-                                let pid = row.get("page_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                                *rrf_scores.entry(pid.clone()).or_default() += w_content_vec / (RRF_K + rank as f64 + 1.0);
-                                page_data.entry(pid).or_insert_with(|| row.clone());
-                            }
-                        }
-                    }
+            // Content vector search
+            if search_in_content
+                && let Ok(content_results) = vector_search(
+                    &table,
+                    &query_vector,
+                    "content_vector",
+                    fetch_limit,
+                    where_clause.as_deref(),
+                )
+                .await
+            {
+                for (rank, row) in content_results.iter().enumerate() {
+                    let pid = row
+                        .get("page_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    *rrf_scores.entry(pid.clone()).or_default() +=
+                        w_content_vec / (RRF_K + rank as f64 + 1.0);
+                    page_data.entry(pid).or_insert_with(|| row.clone());
                 }
             }
         }
 
         // Leg 3: FTS keyword search
         let sanitized = sanitize_query(query);
-        if !sanitized.is_empty() {
-            if let Ok(fts_results) = fts_search(&table, &sanitized, fetch_limit, where_clause.as_deref()).await {
-                for (rank, row) in fts_results.iter().enumerate() {
-                    let pid = row.get("page_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                    *rrf_scores.entry(pid.clone()).or_default() += w_fts / (RRF_K + rank as f64 + 1.0);
-                    page_data.entry(pid).or_insert_with(|| row.clone());
-                }
+        if !sanitized.is_empty()
+            && let Ok(fts_results) =
+                fts_search(&table, &sanitized, fetch_limit, where_clause.as_deref()).await
+        {
+            for (rank, row) in fts_results.iter().enumerate() {
+                let pid = row
+                    .get("page_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                *rrf_scores.entry(pid.clone()).or_default() += w_fts / (RRF_K + rank as f64 + 1.0);
+                page_data.entry(pid).or_insert_with(|| row.clone());
             }
         }
 
@@ -465,7 +529,10 @@ impl HelpSearchEngine {
                     }
                 } else {
                     // For NL queries, per-term matching with coverage score
-                    let matched = query_terms.iter().filter(|t| title_lower.contains(**t)).count();
+                    let matched = query_terms
+                        .iter()
+                        .filter(|t| title_lower.contains(**t))
+                        .count();
                     if matched > 0 {
                         let mut coverage = matched as f64 / num_query_terms as f64;
                         // Bonus for exact full-query match
@@ -483,14 +550,22 @@ impl HelpSearchEngine {
             .collect();
         title_matches.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         for (rank, (pid, _coverage)) in title_matches.iter().enumerate() {
-            *rrf_scores.entry(pid.clone()).or_default() += w_title_match / (RRF_K + rank as f64 + 1.0);
+            *rrf_scores.entry(pid.clone()).or_default() +=
+                w_title_match / (RRF_K + rank as f64 + 1.0);
         }
 
         // Leg 5: Breadcrumb retrieval
-        if let Ok(bc_results) = breadcrumb_retrieval(&table, query, fetch_limit, where_clause.as_deref()).await {
+        if let Ok(bc_results) =
+            breadcrumb_retrieval(&table, query, fetch_limit, where_clause.as_deref()).await
+        {
             for (rank, row) in bc_results.iter().enumerate() {
-                let pid = row.get("page_id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                *rrf_scores.entry(pid.clone()).or_default() += w_breadcrumb / (RRF_K + rank as f64 + 1.0);
+                let pid = row
+                    .get("page_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                *rrf_scores.entry(pid.clone()).or_default() +=
+                    w_breadcrumb / (RRF_K + rank as f64 + 1.0);
                 page_data.entry(pid).or_insert_with(|| row.clone());
             }
         }
@@ -537,12 +612,40 @@ impl HelpSearchEngine {
 
                 let mut result = HashMap::new();
                 result.insert("page_id".to_string(), serde_json::json!(pid));
-                result.insert("title".to_string(), row.get("title").cloned().unwrap_or(serde_json::json!("")));
-                result.insert("file_path".to_string(), row.get("file_path").cloned().unwrap_or(serde_json::json!("")));
-                result.insert("help_id".to_string(), row.get("help_id").cloned().unwrap_or(serde_json::json!(null)));
-                result.insert("is_section".to_string(), serde_json::json!(row.get("is_section").and_then(|v| v.as_i64()).unwrap_or(0) != 0));
-                result.insert("breadcrumb_path".to_string(), row.get("breadcrumb_path").cloned().unwrap_or(serde_json::json!(null)));
-                result.insert("category".to_string(), row.get("category").cloned().unwrap_or(serde_json::json!(null)));
+                result.insert(
+                    "title".to_string(),
+                    row.get("title").cloned().unwrap_or(serde_json::json!("")),
+                );
+                result.insert(
+                    "file_path".to_string(),
+                    row.get("file_path")
+                        .cloned()
+                        .unwrap_or(serde_json::json!("")),
+                );
+                result.insert(
+                    "help_id".to_string(),
+                    row.get("help_id")
+                        .cloned()
+                        .unwrap_or(serde_json::json!(null)),
+                );
+                result.insert(
+                    "is_section".to_string(),
+                    serde_json::json!(
+                        row.get("is_section").and_then(|v| v.as_i64()).unwrap_or(0) != 0
+                    ),
+                );
+                result.insert(
+                    "breadcrumb_path".to_string(),
+                    row.get("breadcrumb_path")
+                        .cloned()
+                        .unwrap_or(serde_json::json!(null)),
+                );
+                result.insert(
+                    "category".to_string(),
+                    row.get("category")
+                        .cloned()
+                        .unwrap_or(serde_json::json!(null)),
+                );
                 result.insert("score".to_string(), serde_json::json!(score));
                 result.insert("snippet".to_string(), serde_json::json!(snippet));
                 result.insert("search_mode".to_string(), serde_json::json!(search_mode));
@@ -550,7 +653,13 @@ impl HelpSearchEngine {
             })
             .collect();
 
-        info!("Search for '{}' (cat={:?}, mode={}) returned {} results", query, category, search_mode, results.len());
+        info!(
+            "Search for '{}' (cat={:?}, mode={}) returned {} results",
+            query,
+            category,
+            search_mode,
+            results.len()
+        );
         Ok(results)
     }
 
@@ -579,7 +688,7 @@ impl HelpSearchEngine {
 
         // Process in chunks
         let indexer = self.indexer.clone();
-        let total_chunks = (total + BUILD_CHUNK_SIZE - 1) / BUILD_CHUNK_SIZE;
+        let total_chunks = total.div_ceil(BUILD_CHUNK_SIZE);
         let mut table_created = false;
 
         for (chunk_idx, chunk) in all_pages.chunks(BUILD_CHUNK_SIZE).enumerate() {
@@ -612,10 +721,7 @@ impl HelpSearchEngine {
             }
 
             if !table_created {
-                self.db
-                    .create_table(TABLE_NAME, batch)
-                    .execute()
-                    .await?;
+                self.db.create_table(TABLE_NAME, batch).execute().await?;
                 table_created = true;
             } else {
                 let table = self.db.open_table(TABLE_NAME).execute().await?;
@@ -648,7 +754,10 @@ impl HelpSearchEngine {
         self.save_metadata(!self._embeddings_enabled).await;
 
         let _ = self.fts_ready_tx.send(true);
-        info!("FTS search index built in {:.1}s ({total} documents)", start.elapsed().as_secs_f64());
+        info!(
+            "FTS search index built in {:.1}s ({total} documents)",
+            start.elapsed().as_secs_f64()
+        );
         Ok(())
     }
 
@@ -680,7 +789,7 @@ impl HelpSearchEngine {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         let total = all_pages.len();
-        let total_chunks = (total + BUILD_CHUNK_SIZE - 1) / BUILD_CHUNK_SIZE;
+        let total_chunks = total.div_ceil(BUILD_CHUNK_SIZE);
 
         info!("Phase 2: Embedding {total} pages via API (chunked)...");
         let phase2_start = Instant::now();
@@ -749,13 +858,15 @@ impl HelpSearchEngine {
             }
 
             // Build Arrow batch with vectors
-            let batch = records_to_hybrid_batch(&records, &title_vectors, &content_vectors, embedder.dimension())?;
+            let batch = records_to_hybrid_batch(
+                &records,
+                &title_vectors,
+                &content_vectors,
+                embedder.dimension(),
+            )?;
 
             if !staging_created {
-                self.db
-                    .create_table(STAGING_TABLE, batch)
-                    .execute()
-                    .await?;
+                self.db.create_table(STAGING_TABLE, batch).execute().await?;
                 staging_created = true;
             } else {
                 let tbl = self.db.open_table(STAGING_TABLE).execute().await?;
@@ -864,8 +975,10 @@ impl HelpSearchEngine {
             .copied()
             .collect();
 
-        let to_upsert: std::collections::HashSet<&String> = added.iter().chain(changed.iter()).copied().collect();
-        let to_delete: std::collections::HashSet<&String> = removed.iter().chain(changed.iter()).copied().collect();
+        let to_upsert: std::collections::HashSet<&String> =
+            added.iter().chain(changed.iter()).copied().collect();
+        let to_delete: std::collections::HashSet<&String> =
+            removed.iter().chain(changed.iter()).copied().collect();
 
         {
             let mut s = self.status.write().await;
@@ -932,7 +1045,10 @@ impl HelpSearchEngine {
             let pages_to_index: Vec<(String, crate::models::HelpPage)> = to_upsert
                 .iter()
                 .filter_map(|pid| {
-                    indexer.pages.get(*pid).map(|p| (pid.to_string(), p.clone()))
+                    indexer
+                        .pages
+                        .get(*pid)
+                        .map(|p| (pid.to_string(), p.clone()))
                 })
                 .collect();
 
@@ -950,16 +1066,20 @@ impl HelpSearchEngine {
 
             if self._embeddings_enabled {
                 if let Some(ref embedder) = self.embedder {
-                    let title_texts: Vec<String> = records.iter()
+                    let title_texts: Vec<String> = records
+                        .iter()
                         .map(|r| format!("{} {}", r.title, r.breadcrumb_path))
                         .collect();
-                    let content_texts: Vec<String> = records.iter()
-                        .map(|r| r.content.clone())
-                        .collect();
+                    let content_texts: Vec<String> =
+                        records.iter().map(|r| r.content.clone()).collect();
 
-                    let title_vecs = embedder.embed_batch(&title_texts, false).await
+                    let title_vecs = embedder
+                        .embed_batch(&title_texts, false)
+                        .await
                         .map_err(|e| anyhow::anyhow!("Title embedding failed: {e}"))?;
-                    let content_vecs = embedder.embed_batch(&content_texts, false).await
+                    let content_vecs = embedder
+                        .embed_batch(&content_texts, false)
+                        .await
                         .map_err(|e| anyhow::anyhow!("Content embedding failed: {e}"))?;
                     let dim = embedder.dimension();
 
@@ -1003,7 +1123,11 @@ impl HelpSearchEngine {
     async fn load_index(&self) -> anyhow::Result<()> {
         let table = self.db.open_table(TABLE_NAME).execute().await?;
         let count = table.count_rows(None).await?;
-        let mode = if self._embeddings_enabled { "hybrid" } else { "FTS-only" };
+        let mode = if self._embeddings_enabled {
+            "hybrid"
+        } else {
+            "FTS-only"
+        };
         info!("Loaded search index with {count} documents ({mode})");
         Ok(())
     }
@@ -1041,7 +1165,10 @@ impl HelpSearchEngine {
             metadata["embedding_model"] = serde_json::Value::String(emb.model_name.clone());
             metadata["embedding_dimensions"] = serde_json::Value::Number(emb.dimension().into());
         }
-        if let Err(e) = std::fs::write(&self.metadata_path, serde_json::to_string_pretty(&metadata).unwrap_or_default()) {
+        if let Err(e) = std::fs::write(
+            &self.metadata_path,
+            serde_json::to_string_pretty(&metadata).unwrap_or_default(),
+        ) {
             warn!("Failed to save metadata: {}", e);
         }
     }
@@ -1055,7 +1182,10 @@ impl HelpSearchEngine {
             Ok(v) => v,
             Err(_) => return false,
         };
-        metadata.get("vectors_ready").and_then(|v| v.as_bool()).unwrap_or(false)
+        metadata
+            .get("vectors_ready")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
     }
 }
 
@@ -1104,7 +1234,8 @@ async fn breadcrumb_retrieval(
     for ch in "\"'*:(){}^+[]-/%_".chars() {
         sanitized = sanitized.replace(ch, " ");
     }
-    let reserved: std::collections::HashSet<&str> = ["and", "or", "not", "near"].into_iter().collect();
+    let reserved: std::collections::HashSet<&str> =
+        ["and", "or", "not", "near"].into_iter().collect();
     let terms: Vec<String> = sanitized
         .split_whitespace()
         .filter(|t| t.len() >= 2 && !reserved.contains(&t.to_lowercase().as_str()))
@@ -1131,11 +1262,21 @@ async fn breadcrumb_retrieval(
 
     // Sort by breadcrumb match quality
     rows.sort_by(|a, b| {
-        let bc_a = a.get("breadcrumb_path").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-        let bc_b = b.get("breadcrumb_path").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+        let bc_a = a
+            .get("breadcrumb_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let bc_b = b
+            .get("breadcrumb_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_lowercase();
         let hits_a: usize = terms.iter().filter(|t| bc_a.contains(t.as_str())).count();
         let hits_b: usize = terms.iter().filter(|t| bc_b.contains(t.as_str())).count();
-        hits_b.cmp(&hits_a).then_with(|| bc_a.len().cmp(&bc_b.len()))
+        hits_b
+            .cmp(&hits_a)
+            .then_with(|| bc_a.len().cmp(&bc_b.len()))
     });
     rows.truncate(limit);
     Ok(rows)
@@ -1229,7 +1370,10 @@ async fn detect_build_strategy(
     };
 
     // Embedding mode changed
-    let stored_embeddings = metadata.get("embeddings_enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+    let stored_embeddings = metadata
+        .get("embeddings_enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     if stored_embeddings != embeddings_enabled {
         info!("Embedding mode changed — full rebuild required");
         return BuildStrategy::Full;
@@ -1237,21 +1381,27 @@ async fn detect_build_strategy(
 
     // Embeddings enabled but Phase 2 never completed (e.g. interrupted)
     if embeddings_enabled {
-        let vectors_ready = metadata.get("vectors_ready").and_then(|v| v.as_bool()).unwrap_or(false);
+        let vectors_ready = metadata
+            .get("vectors_ready")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         if !vectors_ready {
-            info!("Embeddings enabled but vectors not ready (Phase 2 incomplete) — full rebuild required");
+            info!(
+                "Embeddings enabled but vectors not ready (Phase 2 incomplete) — full rebuild required"
+            );
             return BuildStrategy::Full;
         }
     }
 
     // Embedding model changed
-    if embeddings_enabled {
-        if let Some(emb) = embedder {
-            let stored_model = metadata.get("embedding_model").and_then(|v| v.as_str()).unwrap_or("");
-            if stored_model != emb.model_name {
-                info!("Embedding model changed — full rebuild required");
-                return BuildStrategy::Full;
-            }
+    if embeddings_enabled && let Some(emb) = embedder {
+        let stored_model = metadata
+            .get("embedding_model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if stored_model != emb.model_name {
+            info!("Embedding model changed — full rebuild required");
+            return BuildStrategy::Full;
         }
     }
 
@@ -1264,21 +1414,28 @@ async fn detect_build_strategy(
         "language": "English",
         "search_text_boost": "title_3x_breadcrumb_2x"
     });
-    if let Some(stored_fts) = metadata.get("fts_config") {
-        if *stored_fts != current_fts_config {
-            info!("FTS config changed — full rebuild required");
-            return BuildStrategy::Full;
-        }
+    if let Some(stored_fts) = metadata.get("fts_config")
+        && *stored_fts != current_fts_config
+    {
+        info!("FTS config changed — full rebuild required");
+        return BuildStrategy::Full;
     }
 
     // XML unchanged
-    let stored_hash = metadata.get("xml_hash").and_then(|v| v.as_str()).unwrap_or("");
+    let stored_hash = metadata
+        .get("xml_hash")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if stored_hash == indexer.get_xml_hash() {
         return BuildStrategy::None;
     }
 
     // XML changed — incremental if fingerprints available
-    if metadata.get("page_fingerprints").and_then(|v| v.as_object()).is_some() {
+    if metadata
+        .get("page_fingerprints")
+        .and_then(|v| v.as_object())
+        .is_some()
+    {
         info!("XML changed — incremental update possible");
         return BuildStrategy::Incremental;
     }
@@ -1322,11 +1479,20 @@ struct PageRecord {
     category: String,
 }
 
-fn extract_text_for_page(indexer: &HelpContentIndexer, page_id: &str, page: &crate::models::HelpPage) -> PageRecord {
-    let plain_text = indexer.extract_plain_text_no_cache(page).unwrap_or_default();
+fn extract_text_for_page(
+    indexer: &HelpContentIndexer,
+    page_id: &str,
+    page: &crate::models::HelpPage,
+) -> PageRecord {
+    let plain_text = indexer
+        .extract_plain_text_no_cache(page)
+        .unwrap_or_default();
     let breadcrumb_path = indexer.get_breadcrumb_string(page_id);
     let breadcrumb = indexer.get_breadcrumb(page_id);
-    let category = breadcrumb.first().map(|p| p.text.clone()).unwrap_or_default();
+    let category = breadcrumb
+        .first()
+        .map(|p| p.text.clone())
+        .unwrap_or_default();
 
     PageRecord {
         page_id: page_id.to_string(),
@@ -1343,23 +1509,60 @@ fn extract_text_for_page(indexer: &HelpContentIndexer, page_id: &str, page: &cra
 fn records_to_fts_batch(records: &[PageRecord]) -> anyhow::Result<RecordBatch> {
     let schema = Arc::new(fts_schema());
 
-    let page_ids = StringArray::from(records.iter().map(|r| r.page_id.as_str()).collect::<Vec<_>>());
+    let page_ids = StringArray::from(
+        records
+            .iter()
+            .map(|r| r.page_id.as_str())
+            .collect::<Vec<_>>(),
+    );
     let titles = StringArray::from(records.iter().map(|r| r.title.as_str()).collect::<Vec<_>>());
-    let contents = StringArray::from(records.iter().map(|r| r.content.as_str()).collect::<Vec<_>>());
+    let contents = StringArray::from(
+        records
+            .iter()
+            .map(|r| r.content.as_str())
+            .collect::<Vec<_>>(),
+    );
     let search_texts = StringArray::from(
         records
             .iter()
-            .map(|r| format!("{t} {t} {t} {bc} {bc} {c}", t = r.title, bc = r.breadcrumb_path, c = r.content))
+            .map(|r| {
+                format!(
+                    "{t} {t} {t} {bc} {bc} {c}",
+                    t = r.title,
+                    bc = r.breadcrumb_path,
+                    c = r.content
+                )
+            })
             .collect::<Vec<_>>()
             .iter()
             .map(|s| s.as_str())
             .collect::<Vec<_>>(),
     );
-    let file_paths = StringArray::from(records.iter().map(|r| r.file_path.as_str()).collect::<Vec<_>>());
-    let help_ids = StringArray::from(records.iter().map(|r| r.help_id.as_str()).collect::<Vec<_>>());
+    let file_paths = StringArray::from(
+        records
+            .iter()
+            .map(|r| r.file_path.as_str())
+            .collect::<Vec<_>>(),
+    );
+    let help_ids = StringArray::from(
+        records
+            .iter()
+            .map(|r| r.help_id.as_str())
+            .collect::<Vec<_>>(),
+    );
     let is_sections = Int32Array::from(records.iter().map(|r| r.is_section).collect::<Vec<_>>());
-    let breadcrumbs = StringArray::from(records.iter().map(|r| r.breadcrumb_path.as_str()).collect::<Vec<_>>());
-    let categories = StringArray::from(records.iter().map(|r| r.category.as_str()).collect::<Vec<_>>());
+    let breadcrumbs = StringArray::from(
+        records
+            .iter()
+            .map(|r| r.breadcrumb_path.as_str())
+            .collect::<Vec<_>>(),
+    );
+    let categories = StringArray::from(
+        records
+            .iter()
+            .map(|r| r.category.as_str())
+            .collect::<Vec<_>>(),
+    );
 
     Ok(RecordBatch::try_new(
         schema,
@@ -1388,30 +1591,71 @@ fn records_to_hybrid_batch(
 
     let schema = Arc::new(hybrid_schema(dim));
 
-    let page_ids = StringArray::from(records.iter().map(|r| r.page_id.as_str()).collect::<Vec<_>>());
+    let page_ids = StringArray::from(
+        records
+            .iter()
+            .map(|r| r.page_id.as_str())
+            .collect::<Vec<_>>(),
+    );
     let titles = StringArray::from(records.iter().map(|r| r.title.as_str()).collect::<Vec<_>>());
-    let contents = StringArray::from(records.iter().map(|r| r.content.as_str()).collect::<Vec<_>>());
+    let contents = StringArray::from(
+        records
+            .iter()
+            .map(|r| r.content.as_str())
+            .collect::<Vec<_>>(),
+    );
     let search_texts = StringArray::from(
         records
             .iter()
-            .map(|r| format!("{t} {t} {t} {bc} {bc} {c}", t = r.title, bc = r.breadcrumb_path, c = r.content))
+            .map(|r| {
+                format!(
+                    "{t} {t} {t} {bc} {bc} {c}",
+                    t = r.title,
+                    bc = r.breadcrumb_path,
+                    c = r.content
+                )
+            })
             .collect::<Vec<_>>()
             .iter()
             .map(|s| s.as_str())
             .collect::<Vec<_>>(),
     );
-    let file_paths = StringArray::from(records.iter().map(|r| r.file_path.as_str()).collect::<Vec<_>>());
-    let help_ids = StringArray::from(records.iter().map(|r| r.help_id.as_str()).collect::<Vec<_>>());
+    let file_paths = StringArray::from(
+        records
+            .iter()
+            .map(|r| r.file_path.as_str())
+            .collect::<Vec<_>>(),
+    );
+    let help_ids = StringArray::from(
+        records
+            .iter()
+            .map(|r| r.help_id.as_str())
+            .collect::<Vec<_>>(),
+    );
     let is_sections = Int32Array::from(records.iter().map(|r| r.is_section).collect::<Vec<_>>());
-    let breadcrumbs = StringArray::from(records.iter().map(|r| r.breadcrumb_path.as_str()).collect::<Vec<_>>());
-    let categories = StringArray::from(records.iter().map(|r| r.category.as_str()).collect::<Vec<_>>());
+    let breadcrumbs = StringArray::from(
+        records
+            .iter()
+            .map(|r| r.breadcrumb_path.as_str())
+            .collect::<Vec<_>>(),
+    );
+    let categories = StringArray::from(
+        records
+            .iter()
+            .map(|r| r.category.as_str())
+            .collect::<Vec<_>>(),
+    );
 
     let title_vec_array = FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(
-        title_vectors.iter().map(|v| Some(v.iter().map(|&f| Some(f)).collect::<Vec<_>>())),
+        title_vectors
+            .iter()
+            .map(|v| Some(v.iter().map(|&f| Some(f)).collect::<Vec<_>>())),
         dim as i32,
     );
     let content_vec_array = FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(
-        content_vectors.iter().map(|v| Some(v.iter().map(|&f| Some(f)).collect::<Vec<_>>())),
+        content_vectors
+            .iter()
+            .map(|v| Some(v.iter().map(|&f| Some(f)).collect::<Vec<_>>())),
         dim as i32,
     );
 
@@ -1451,12 +1695,18 @@ fn hybrid_schema(dim: usize) -> Schema {
     let mut fields = fts_schema().fields().to_vec();
     fields.push(Arc::new(Field::new(
         "title_vector",
-        DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), dim as i32),
+        DataType::FixedSizeList(
+            Arc::new(Field::new("item", DataType::Float32, true)),
+            dim as i32,
+        ),
         true,
     )));
     fields.push(Arc::new(Field::new(
         "content_vector",
-        DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), dim as i32),
+        DataType::FixedSizeList(
+            Arc::new(Field::new("item", DataType::Float32, true)),
+            dim as i32,
+        ),
         true,
     )));
     Schema::new(fields)
@@ -1503,7 +1753,8 @@ mod tests {
 
     #[test]
     fn test_generate_snippet() {
-        let content = "This is a long text about MC_MoveAbsolute function block that does motion control.";
+        let content =
+            "This is a long text about MC_MoveAbsolute function block that does motion control.";
         let snippet = generate_snippet(content, "MC_MoveAbsolute").unwrap();
         assert!(snippet.contains("MC_MoveAbsolute"));
     }
@@ -1511,7 +1762,8 @@ mod tests {
     #[test]
     fn test_generate_snippet_utf8_boundary() {
         // German text with multi-byte characters (ä=2 bytes, ö=2 bytes, ü=2 bytes, ß=2 bytes)
-        let content = "Übersicht der Sicherheitstechnik mit Änderungen für Größenberechnung und Maße";
+        let content =
+            "Übersicht der Sicherheitstechnik mit Änderungen für Größenberechnung und Maße";
         let snippet = generate_snippet(content, "Sicherheitstechnik").unwrap();
         assert!(snippet.contains("Sicherheitstechnik"));
 

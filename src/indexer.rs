@@ -6,9 +6,9 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
 use md5::{Digest, Md5};
-use quick_xml::events::{BytesStart, Event};
-use quick_xml::XmlVersion;
 use quick_xml::Reader;
+use quick_xml::XmlVersion;
+use quick_xml::events::{BytesStart, Event};
 use tracing::{debug, error, info, warn};
 
 use crate::models::HelpPage;
@@ -167,15 +167,17 @@ impl HelpContentIndexer {
                         _ => {}
                     }
                 }
-                Ok(Event::End(_)) => {
-                    if depth > 0 {
-                        parent_stack.pop();
-                        depth -= 1;
-                    }
+                Ok(Event::End(_)) if depth > 0 => {
+                    parent_stack.pop();
+                    depth -= 1;
                 }
                 Ok(Event::Eof) => break,
                 Err(e) => {
-                    error!("XML parse error at position {}: {}", xml.error_position(), e);
+                    error!(
+                        "XML parse error at position {}: {}",
+                        xml.error_position(),
+                        e
+                    );
                     anyhow::bail!("Failed to parse XML: {}", e);
                 }
                 _ => {}
@@ -200,7 +202,10 @@ impl HelpContentIndexer {
         // Pre-compute breadcrumbs
         info!("Pre-computing breadcrumbs for all pages...");
         self.precompute_breadcrumbs();
-        info!("Breadcrumb cache populated: {} entries", self.breadcrumb_cache.len());
+        info!(
+            "Breadcrumb cache populated: {} entries",
+            self.breadcrumb_cache.len()
+        );
 
         Ok(())
     }
@@ -223,10 +228,7 @@ impl HelpContentIndexer {
             .or_else(|| self.attr_str(e, b"p"))
             .unwrap_or_default();
 
-        let id = match id {
-            Some(id) => id,
-            None => return None,
-        };
+        let id = id?;
 
         // Check for HelpID in nested Identifiers/I > HelpID/H elements.
         // NOTE: quick-xml SAX parsing doesn't let us look ahead into children here.
@@ -259,11 +261,7 @@ impl HelpContentIndexer {
             };
             self.pages.insert(synthetic_id.clone(), page);
 
-            if is_section {
-                Some(synthetic_id)
-            } else {
-                None
-            }
+            if is_section { Some(synthetic_id) } else { None }
         } else {
             let page = HelpPage {
                 id: id.clone(),
@@ -275,11 +273,7 @@ impl HelpContentIndexer {
             };
             self.pages.insert(id.clone(), page);
 
-            if is_section {
-                Some(id)
-            } else {
-                None
-            }
+            if is_section { Some(id) } else { None }
         }
     }
 
@@ -349,13 +343,13 @@ impl HelpContentIndexer {
                             let value = self
                                 .attr_str(e, b"Value")
                                 .or_else(|| self.attr_str(e, b"v"));
-                            if let Some(help_id) = value {
-                                if let Some(Some(page_id)) = current_page_id.last() {
-                                    if let Some(page) = self.pages.get_mut(page_id) {
-                                        page.help_id = Some(help_id.clone());
-                                    }
-                                    self.help_id_map.insert(help_id, page_id.clone());
+                            if let Some(help_id) = value
+                                && let Some(Some(page_id)) = current_page_id.last()
+                            {
+                                if let Some(page) = self.pages.get_mut(page_id) {
+                                    page.help_id = Some(help_id.clone());
                                 }
+                                self.help_id_map.insert(help_id, page_id.clone());
                             }
                         }
                         _ => {}
@@ -380,13 +374,13 @@ impl HelpContentIndexer {
                             let value = self
                                 .attr_str(e, b"Value")
                                 .or_else(|| self.attr_str(e, b"v"));
-                            if let Some(help_id) = value {
-                                if let Some(Some(page_id)) = current_page_id.last() {
-                                    if let Some(page) = self.pages.get_mut(page_id) {
-                                        page.help_id = Some(help_id.clone());
-                                    }
-                                    self.help_id_map.insert(help_id, page_id.clone());
+                            if let Some(help_id) = value
+                                && let Some(Some(page_id)) = current_page_id.last()
+                            {
+                                if let Some(page) = self.pages.get_mut(page_id) {
+                                    page.help_id = Some(help_id.clone());
                                 }
+                                self.help_id_map.insert(help_id, page_id.clone());
                             }
                         }
                         _ => {}
@@ -437,7 +431,10 @@ impl HelpContentIndexer {
 
         while let Some(ref cid) = current_id {
             if visited.contains(cid) {
-                debug!("Duplicate ID detected in breadcrumb for '{}': stopping at {}", page_id, cid);
+                debug!(
+                    "Duplicate ID detected in breadcrumb for '{}': stopping at {}",
+                    page_id, cid
+                );
                 break;
             }
             visited.insert(cid.clone());
@@ -454,7 +451,10 @@ impl HelpContentIndexer {
             current_id = page.parent_id.clone();
 
             if breadcrumb.len() > 100 {
-                error!("Breadcrumb depth exceeded 100 levels for '{}' — stopping", page_id);
+                error!(
+                    "Breadcrumb depth exceeded 100 levels for '{}' — stopping",
+                    page_id
+                );
                 break;
             }
         }
@@ -471,9 +471,7 @@ impl HelpContentIndexer {
             .cloned()
             .unwrap_or_else(|| self.compute_breadcrumb(page_id));
 
-        ids.iter()
-            .filter_map(|id| self.pages.get(id))
-            .collect()
+        ids.iter().filter_map(|id| self.pages.get(id)).collect()
     }
 
     /// Get breadcrumb as `"Root > Section > Page"` string.
@@ -517,18 +515,16 @@ impl HelpContentIndexer {
         let resolved = self.help_root.join(file_path);
 
         // Double-check via canonicalization (handles symlinks)
-        if let (Ok(canonical_root), Ok(canonical_file)) = (
-            self.help_root.canonicalize(),
-            resolved.canonicalize(),
-        ) {
-            if !canonical_file.starts_with(&canonical_root) {
-                warn!(
-                    "Path escapes help root: {} -> {}",
-                    file_path,
-                    canonical_file.display()
-                );
-                return None;
-            }
+        if let (Ok(canonical_root), Ok(canonical_file)) =
+            (self.help_root.canonicalize(), resolved.canonicalize())
+            && !canonical_file.starts_with(&canonical_root)
+        {
+            warn!(
+                "Path escapes help root: {} -> {}",
+                file_path,
+                canonical_file.display()
+            );
+            return None;
         }
 
         Some(resolved)
@@ -598,7 +594,7 @@ impl HelpContentIndexer {
                 file_path: p.file_path.clone(),
             })
             .collect();
-        cats.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+        cats.sort_by_key(|a| a.title.to_lowercase());
         cats
     }
 
@@ -628,8 +624,8 @@ impl HelpContentIndexer {
             }
         }
 
-        sections.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
-        pages.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+        sections.sort_by_key(|a| a.title.to_lowercase());
+        pages.sort_by_key(|a| a.title.to_lowercase());
         sections.extend(pages);
         sections
     }
@@ -710,7 +706,10 @@ impl HelpContentIndexer {
             "help_id_count": self.help_id_map.len(),
             "help_root": self.help_root.display().to_string(),
         });
-        if let Err(e) = fs::write(&self.metadata_path, serde_json::to_string_pretty(&metadata).unwrap_or_default()) {
+        if let Err(e) = fs::write(
+            &self.metadata_path,
+            serde_json::to_string_pretty(&metadata).unwrap_or_default(),
+        ) {
             warn!("Failed to save metadata: {}", e);
         } else {
             info!(
@@ -752,8 +751,21 @@ fn extract_text_from_html(html: &str) -> Option<String> {
         document.select(&skip_selector).map(|e| e.id()).collect();
 
     let block_tags: std::collections::HashSet<&str> = [
-        "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "td", "th", "tr", "table",
-        "blockquote", "pre",
+        "p",
+        "div",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "li",
+        "td",
+        "th",
+        "tr",
+        "table",
+        "blockquote",
+        "pre",
     ]
     .into_iter()
     .collect();
@@ -779,10 +791,8 @@ fn extract_text_from_html(html: &str) -> Option<String> {
                     text_parts.push(t.text.to_string());
                 }
             }
-            Node::Element(el) => {
-                if block_tags.contains(el.name()) {
-                    text_parts.push(" ".to_string());
-                }
+            Node::Element(el) if block_tags.contains(el.name()) => {
+                text_parts.push(" ".to_string());
             }
             _ => {}
         }

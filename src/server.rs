@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
@@ -15,8 +15,8 @@ use rmcp::model::{
 };
 use rmcp::schemars::{self, JsonSchema};
 use rmcp::service::RequestContext;
-use rmcp::{tool, tool_handler, tool_router, RoleServer};
 use rmcp::{ErrorData as McpError, ServerHandler};
+use rmcp::{RoleServer, tool, tool_handler, tool_router};
 use serde::Deserialize;
 
 use crate::config::AppConfig;
@@ -227,18 +227,15 @@ impl HelpServer {
             .iter()
             .map(|r| {
                 // Intentionally short preview to force get_page_by_id
-                let preview = r
-                    .get("snippet")
-                    .and_then(|v| v.as_str())
-                    .map(|s| {
-                        let trimmed = s.trim();
-                        if trimmed.len() > 100 {
-                            let safe_end = crate::search_engine::safe_truncate(trimmed, 100);
-                            format!("{safe_end}...")
-                        } else {
-                            format!("{trimmed}...")
-                        }
-                    });
+                let preview = r.get("snippet").and_then(|v| v.as_str()).map(|s| {
+                    let trimmed = s.trim();
+                    if trimmed.len() > 100 {
+                        let safe_end = crate::search_engine::safe_truncate(trimmed, 100);
+                        format!("{safe_end}...")
+                    } else {
+                        format!("{trimmed}...")
+                    }
+                });
 
                 // Round score to 3 decimal places to save tokens
                 let score = r
@@ -578,7 +575,9 @@ impl ServerHandler for HelpServer {
             prompts: vec![
                 Prompt::new(
                     "help_search",
-                    Some("Search for a topic in B&R help and return comprehensive results with locations and HelpIDs."),
+                    Some(
+                        "Search for a topic in B&R help and return comprehensive results with locations and HelpIDs.",
+                    ),
                     Some(vec![
                         PromptArgument::new("topic")
                             .with_description("The topic to search for")
@@ -587,7 +586,9 @@ impl ServerHandler for HelpServer {
                 ),
                 Prompt::new(
                     "help_details",
-                    Some("Deep research a topic — retrieves and synthesizes content from multiple pages."),
+                    Some(
+                        "Deep research a topic — retrieves and synthesizes content from multiple pages.",
+                    ),
                     Some(vec![
                         PromptArgument::new("topic")
                             .with_description("The topic to research")
