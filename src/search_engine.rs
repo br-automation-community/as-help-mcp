@@ -65,7 +65,7 @@ pub fn safe_truncate(s: &str, max_bytes: usize) -> &str {
 
 /// Detect if a query looks like a technical identifier (PascalCase, snake_case, etc.).
 fn is_identifier_query(query: &str) -> bool {
-    let words: Vec<&str> = query.split_whitespace().collect();
+    let words: Vec<&str> = query.trim().split_whitespace().collect();
     !words.is_empty() && words.len() <= 2 && words.iter().all(|w| IDENTIFIER_RE.is_match(w))
 }
 
@@ -113,10 +113,10 @@ fn generate_snippet(content: &str, query: &str) -> Option<String> {
         let lower = content.to_lowercase();
         let mut best_pos = content.len();
         for term in &terms {
-            if let Some(pos) = lower.find(&term.to_lowercase())
-                && pos < best_pos
-            {
-                best_pos = pos;
+            if let Some(pos) = lower.find(&term.to_lowercase()) {
+                if pos < best_pos {
+                    best_pos = pos;
+                }
             }
         }
         if best_pos < content.len() {
@@ -438,71 +438,74 @@ impl HelpSearchEngine {
         let mut page_data: HashMap<String, HashMap<String, serde_json::Value>> = HashMap::new();
 
         // Leg 1 + 2: Vector search (if hybrid mode is ready)
-        if use_vectors
-            && let Some(ref embedder) = self.embedder
-            && let Ok(query_vector) = embedder.embed_text(query).await
-        {
-            // Title vector search
-            if let Ok(title_results) = vector_search(
-                &table,
-                &query_vector,
-                "title_vector",
-                fetch_limit,
-                where_clause.as_deref(),
-            )
-            .await
-            {
-                for (rank, row) in title_results.iter().enumerate() {
-                    let pid = row
-                        .get("page_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string();
-                    *rrf_scores.entry(pid.clone()).or_default() +=
-                        w_title_vec / (RRF_K + rank as f64 + 1.0);
-                    page_data.entry(pid).or_insert_with(|| row.clone());
-                }
-            }
+        if use_vectors {
+            if let Some(ref embedder) = self.embedder {
+                if let Ok(query_vector) = embedder.embed_text(query).await {
+                    // Title vector search
+                    if let Ok(title_results) = vector_search(
+                        &table,
+                        &query_vector,
+                        "title_vector",
+                        fetch_limit,
+                        where_clause.as_deref(),
+                    )
+                    .await
+                    {
+                        for (rank, row) in title_results.iter().enumerate() {
+                            let pid = row
+                                .get("page_id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default()
+                                .to_string();
+                            *rrf_scores.entry(pid.clone()).or_default() +=
+                                w_title_vec / (RRF_K + rank as f64 + 1.0);
+                            page_data.entry(pid).or_insert_with(|| row.clone());
+                        }
+                    }
 
-            // Content vector search
-            if search_in_content
-                && let Ok(content_results) = vector_search(
-                    &table,
-                    &query_vector,
-                    "content_vector",
-                    fetch_limit,
-                    where_clause.as_deref(),
-                )
-                .await
-            {
-                for (rank, row) in content_results.iter().enumerate() {
-                    let pid = row
-                        .get("page_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string();
-                    *rrf_scores.entry(pid.clone()).or_default() +=
-                        w_content_vec / (RRF_K + rank as f64 + 1.0);
-                    page_data.entry(pid).or_insert_with(|| row.clone());
+                    // Content vector search
+                    if search_in_content {
+                        if let Ok(content_results) = vector_search(
+                            &table,
+                            &query_vector,
+                            "content_vector",
+                            fetch_limit,
+                            where_clause.as_deref(),
+                        )
+                        .await
+                        {
+                            for (rank, row) in content_results.iter().enumerate() {
+                                let pid = row
+                                    .get("page_id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or_default()
+                                    .to_string();
+                                *rrf_scores.entry(pid.clone()).or_default() +=
+                                    w_content_vec / (RRF_K + rank as f64 + 1.0);
+                                page_data.entry(pid).or_insert_with(|| row.clone());
+                            }
+                        }
+                    }
                 }
             }
         }
 
         // Leg 3: FTS keyword search
         let sanitized = sanitize_query(query);
-        if !sanitized.is_empty()
-            && let Ok(fts_results) =
+        if !sanitized.is_empty() {
+            if let Ok(fts_results) =
                 fts_search(&table, &sanitized, fetch_limit, where_clause.as_deref()).await
-        {
-            for (rank, row) in fts_results.iter().enumerate() {
-                let pid = row
-                    .get("page_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                *rrf_scores.entry(pid.clone()).or_default() +=
-                    w_fts / (RRF_K + rank as f64 + 1.0);
-                page_data.entry(pid).or_insert_with(|| row.clone());
+            {
+                for (rank, row) in fts_results.iter().enumerate() {
+                    let pid = row
+                        .get("page_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    *rrf_scores.entry(pid.clone()).or_default() +=
+                        w_fts / (RRF_K + rank as f64 + 1.0);
+                    page_data.entry(pid).or_insert_with(|| row.clone());
+                }
             }
         }
 
@@ -654,7 +657,7 @@ impl HelpSearchEngine {
 
         // Process in chunks
         let indexer = self.indexer.clone();
-        let total_chunks = total.div_ceil(BUILD_CHUNK_SIZE);
+        let total_chunks = (total + BUILD_CHUNK_SIZE - 1) / BUILD_CHUNK_SIZE;
         let mut table_created = false;
 
         for (chunk_idx, chunk) in all_pages.chunks(BUILD_CHUNK_SIZE).enumerate() {
@@ -755,7 +758,7 @@ impl HelpSearchEngine {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         let total = all_pages.len();
-        let total_chunks = total.div_ceil(BUILD_CHUNK_SIZE);
+        let total_chunks = (total + BUILD_CHUNK_SIZE - 1) / BUILD_CHUNK_SIZE;
 
         info!("Phase 2: Embedding {total} pages via API (chunked)...");
         let phase2_start = Instant::now();
@@ -1362,16 +1365,16 @@ async fn detect_build_strategy(
     }
 
     // Embedding model changed
-    if embeddings_enabled
-        && let Some(emb) = embedder
-    {
-        let stored_model = metadata
-            .get("embedding_model")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        if stored_model != emb.model_name {
-            info!("Embedding model changed — full rebuild required");
-            return BuildStrategy::Full;
+    if embeddings_enabled {
+        if let Some(emb) = embedder {
+            let stored_model = metadata
+                .get("embedding_model")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if stored_model != emb.model_name {
+                info!("Embedding model changed — full rebuild required");
+                return BuildStrategy::Full;
+            }
         }
     }
 
@@ -1385,11 +1388,11 @@ async fn detect_build_strategy(
         "search_text_boost": "title_1x_breadcrumb_1x",
         "title_fts_index": false
     });
-    if let Some(stored_fts) = metadata.get("fts_config")
-        && *stored_fts != current_fts_config
-    {
-        info!("FTS config changed — full rebuild required");
-        return BuildStrategy::Full;
+    if let Some(stored_fts) = metadata.get("fts_config") {
+        if *stored_fts != current_fts_config {
+            info!("FTS config changed — full rebuild required");
+            return BuildStrategy::Full;
+        }
     }
 
     // XML unchanged
