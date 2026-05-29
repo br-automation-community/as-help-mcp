@@ -549,7 +549,7 @@ impl HelpSearchEngine {
             }
         }
 
-        // Sort by RRF score and take top results
+        let total_chunks = total.div_ceil(BUILD_CHUNK_SIZE);
         let mut sorted: Vec<_> = rrf_scores.into_iter().collect();
         sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
