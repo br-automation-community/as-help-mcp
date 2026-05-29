@@ -238,6 +238,8 @@ Pages are sorted by descending score. Pages that appear in only one signal still
 
 The 4th signal directly rewards pages whose title contains the query as a substring. Results are sorted with exact matches first, then by title length (shorter = more specific). This captures the common case where users search for a specific function block or hardware module by name.
 
+Both natural-language and identifier queries use the **same full-query-substring rule** — a title earns the title-match bonus only when it contains the entire trimmed query. There is no per-term coverage bonus for multi-word NL queries; this matches the Python reference implementation and avoids over-weighting shallow single-term title matches (e.g. an HMI "…axis" trend page outranking the real configuration topic for "how to configure an axis").
+
 ### Breadcrumb-match signal
 
 The 5th signal rewards pages whose breadcrumb path (e.g., "Motion control > ACP10/ARNC0 > General information > Revision Information") contains query terms. Pages are ranked by how many distinct query terms appear in their breadcrumb — more matching terms yield a better rank. This helps surface pages with generic titles (like "Revision Information") that live under highly relevant sections (like "ACP10/ARNC0").
