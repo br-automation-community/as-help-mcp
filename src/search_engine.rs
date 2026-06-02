@@ -505,51 +505,26 @@ impl HelpSearchEngine {
             }
         }
 
-        // Leg 4: Title match bonus (per-term matching for NL, full-string for identifiers)
+        // Leg 4: Title match bonus — full-query substring match, ranked by exact
+        // match first then shorter (tighter) titles. Only re-ranks pages already
+        // in the candidate pool.
         let query_lower = query.trim().to_lowercase();
-        let query_terms: Vec<&str> = query_lower
-            .split_whitespace()
-            .filter(|t| t.len() >= 2)
-            .collect();
-        let num_query_terms = query_terms.len().max(1);
-
-        let mut title_matches: Vec<(String, f64)> = page_data
+        let mut title_matches: Vec<(String, bool, usize)> = page_data
             .iter()
             .filter_map(|(pid, data)| {
                 let title = data.get("title")?.as_str()?;
                 let title_lower = title.to_lowercase();
-
-                if is_id {
-                    // For identifiers, keep full-string matching
-                    if title_lower.contains(&query_lower) {
-                        let coverage = if title_lower == query_lower { 1.0 } else { 0.8 };
-                        Some((pid.clone(), coverage))
-                    } else {
-                        None
-                    }
+                if title_lower.contains(&query_lower) {
+                    let is_exact = title_lower == query_lower;
+                    Some((pid.clone(), is_exact, title.len()))
                 } else {
-                    // For NL queries, per-term matching with coverage score
-                    let matched = query_terms
-                        .iter()
-                        .filter(|t| title_lower.contains(**t))
-                        .count();
-                    if matched > 0 {
-                        let mut coverage = matched as f64 / num_query_terms as f64;
-                        // Bonus for exact full-query match
-                        if title_lower.contains(&query_lower) {
-                            coverage = (coverage + 1.0) / 2.0 + 0.5;
-                        }
-                        // Slight preference for shorter (tighter) titles
-                        let len_penalty = 1.0 - (title.len() as f64 / 500.0).min(0.2);
-                        Some((pid.clone(), coverage * len_penalty))
-                    } else {
-                        None
-                    }
+                    None
                 }
             })
             .collect();
-        title_matches.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        for (rank, (pid, _coverage)) in title_matches.iter().enumerate() {
+        // Exact matches first (is_exact = true), then shorter titles first.
+        title_matches.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.2.cmp(&b.2)));
+        for (rank, (pid, _, _)) in title_matches.iter().enumerate() {
             *rrf_scores.entry(pid.clone()).or_default() +=
                 w_title_match / (RRF_K + rank as f64 + 1.0);
         }
@@ -570,17 +545,6 @@ impl HelpSearchEngine {
             }
         }
 
-        // Apply section page demotion
-        for (pid, score) in rrf_scores.iter_mut() {
-            if let Some(data) = page_data.get(pid) {
-                let is_section = data.get("is_section").and_then(|v| v.as_i64()).unwrap_or(0) != 0;
-                if is_section {
-                    *score *= 0.75;
-                }
-            }
-        }
-
-        // Sort by RRF score and take top results
         let mut sorted: Vec<_> = rrf_scores.into_iter().collect();
         sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -1157,7 +1121,8 @@ impl HelpSearchEngine {
                 "ascii_folding": true,
                 "with_position": false,
                 "language": "English",
-                "search_text_boost": "title_3x_breadcrumb_2x"
+                "search_text_boost": "title_1x_breadcrumb_1x",
+                "title_fts_index": false
             },
             "page_fingerprints": self.indexer.get_page_fingerprints(),
         });
@@ -1319,6 +1284,7 @@ fn batches_to_rows(batches: &[RecordBatch]) -> Vec<HashMap<String, serde_json::V
 // ---------------------------------------------------------------------------
 
 async fn create_fts_index(table: &lancedb::Table) -> anyhow::Result<()> {
+    // FTS index over the composite search_text (title + breadcrumb + content).
     table
         .create_index(
             &["search_text"],
@@ -1412,7 +1378,8 @@ async fn detect_build_strategy(
         "ascii_folding": true,
         "with_position": false,
         "language": "English",
-        "search_text_boost": "title_3x_breadcrumb_2x"
+        "search_text_boost": "title_1x_breadcrumb_1x",
+        "title_fts_index": false
     });
     if let Some(stored_fts) = metadata.get("fts_config")
         && *stored_fts != current_fts_config
@@ -1527,7 +1494,7 @@ fn records_to_fts_batch(records: &[PageRecord]) -> anyhow::Result<RecordBatch> {
             .iter()
             .map(|r| {
                 format!(
-                    "{t} {t} {t} {bc} {bc} {c}",
+                    "{t} {bc} {c}",
                     t = r.title,
                     bc = r.breadcrumb_path,
                     c = r.content
@@ -1609,7 +1576,7 @@ fn records_to_hybrid_batch(
             .iter()
             .map(|r| {
                 format!(
-                    "{t} {t} {t} {bc} {bc} {c}",
+                    "{t} {bc} {c}",
                     t = r.title,
                     bc = r.breadcrumb_path,
                     c = r.content
