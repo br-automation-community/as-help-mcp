@@ -17,10 +17,10 @@ MCP server for B&R Automation Studio help documentation search. Provides keyword
 
 ## Prerequisites
 
-- B&R Automation Studio installed (with help documentation)
+- B&R Automation Studio installed (or its help files copied/mounted on macOS)
 - VS Code with GitHub Copilot extension
-- **For standalone binary:** Download `as-help-server.exe` from [Releases](../../releases) — no build tools required
-- **For building from source:** [Rust 1.85+](https://www.rust-lang.org/tools/install)
+- **For standalone binary:** Download the Windows `.exe` or macOS Apple Silicon binary from [Releases](../../releases) — no build tools required
+- **For building from source:** [Rust 1.91+](https://www.rust-lang.org/tools/install)
 - **Optional** (for hybrid search): An OpenAI-compatible embedding API (e.g., [Ollama](https://ollama.com/) with `nomic-embed-text`)
 
 ## Quick Start (VS Code)
@@ -29,7 +29,7 @@ Add to `.vscode/mcp.json` in your workspace:
 
 ### Option 1: Standalone Binary (Recommended)
 
-Download the `.exe` from [Releases](../../releases) and place it in `%APPDATA%\as-help-mcp\`.
+Download the platform-appropriate binary from [Releases](../../releases). Windows users should place the `.exe` in `%APPDATA%\as-help-mcp\`.
 
 ```json
 {
@@ -55,15 +55,56 @@ Update `--help-root` to match your AS installation:
 - **AS 4.x:** `C:\\BRAutomation\\AS412\\Help-en\\Data`
 - **AS 6.x:** `C:\\Program Files (x86)\\BRAutomation\\AS6\\Help-en\\Data`
 
+On Apple Silicon macOS, download `as-help-server-macos-arm64`, make it executable, and place it somewhere on your PATH:
+
+```bash
+mkdir -p ~/.local/bin
+cp ~/Downloads/as-help-server-macos-arm64 ~/.local/bin/
+chmod +x ~/.local/bin/as-help-server-macos-arm64
+```
+
+Then use it in `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "as-help": {
+      "command": "/Users/you/.local/bin/as-help-server-macos-arm64",
+      "args": [
+        "--help-root",
+        "/Users/you/AS6/Help-en/Data",
+        "--db-path",
+        "/Users/you/.ashelp/data/as6/.ashelp_lance",
+        "--metadata-dir",
+        "/Users/you/.ashelp/data/as6/.ashelp_metadata",
+        "--as-version",
+        "6"
+      ]
+    }
+  }
+}
+```
+
 ### Option 2: Build from Source
 
 ```bash
 git clone <repository-url>
 cd as-help-mcp
+```
+
+On macOS, install the required Protocol Buffers compiler first:
+
+```bash
+brew install protobuf
+```
+
+Then build:
+
+```bash
 cargo build --release
 ```
 
-The binary is at `target/release/as-help-server.exe`.
+The binary is at `target/release/as-help-server` on macOS or `target/release/as-help-server.exe` on Windows.
 
 ```json
 {
