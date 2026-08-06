@@ -33,7 +33,7 @@ jobs:
       - name: Run tests
         run: cargo test
 
-  build-release:
+  build-release-windows:
     runs-on: windows-latest
     needs: check
     steps:
@@ -54,3 +54,25 @@ jobs:
         with:
           name: as-help-server-windows-x64
           path: target/release/as-help-server.exe
+
+  build-release-macos-arm64:
+    runs-on: macos-26
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install protoc
+        run: brew install protobuf
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: as-help-server-macos-arm64
+          path: target/release/as-help-server
