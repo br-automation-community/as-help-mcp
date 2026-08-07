@@ -33,9 +33,24 @@ jobs:
       - name: Run tests
         run: cargo test
 
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+
+      - name: Run tests
+        run: cargo test
+
   build-release-windows:
     runs-on: windows-latest
-    needs: check
+    needs: [check, test-windows]
     steps:
       - uses: actions/checkout@v4
 
@@ -55,9 +70,24 @@ jobs:
           name: as-help-server-windows-x64
           path: target/release/as-help-server.exe
 
+  test-macos-arm64:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install protoc
+        run: brew install protobuf
+
+      - name: Run tests
+        run: cargo test
+
   build-release-macos-arm64:
     runs-on: macos-26
-    needs: check
+    needs: [check, test-macos-arm64]
     steps:
       - uses: actions/checkout@v4
 
