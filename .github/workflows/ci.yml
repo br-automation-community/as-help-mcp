@@ -43,8 +43,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Unauthenticated, the action's GitHub API lookup of the protoc release
+      # shares the runner IP's 60 requests/hour limit and fails intermittently.
       - name: Install protoc
         uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build release binary
         run: cargo build --release
