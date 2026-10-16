@@ -1,6 +1,7 @@
 //! Application configuration from environment variables and CLI arguments.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::Parser;
 
@@ -56,6 +57,9 @@ pub struct AppConfig {
     pub host: String,
     pub port: u16,
     pub disable_dns_rebinding_protection: bool,
+    /// Idle lifetime of a streamable-http session; `None` disables expiry.
+    /// Always `None` for stdio, which has no sessions.
+    pub session_idle_timeout: Option<Duration>,
 }
 
 /// Embedding API configuration.
@@ -171,6 +175,21 @@ impl AppConfig {
         let disable_dns_rebinding_protection =
             env_bool("MCP_DISABLE_DNS_REBINDING_PROTECTION", false);
 
+        // Read only for HTTP so a malformed value cannot break stdio startup.
+        let session_idle_timeout = match transport {
+            Transport::StreamableHttp => {
+                let raw = match std::env::var("MCP_SESSION_IDLE_TIMEOUT_SECS") {
+                    Ok(raw) => Some(raw),
+                    Err(std::env::VarError::NotPresent) => None,
+                    Err(std::env::VarError::NotUnicode(_)) => {
+                        anyhow::bail!(INVALID_SESSION_IDLE_TIMEOUT)
+                    }
+                };
+                parse_session_idle_timeout(raw.as_deref())?
+            }
+            Transport::Stdio => None,
+        };
+
         Ok(Self {
             help_root,
             db_path,
@@ -184,6 +203,7 @@ impl AppConfig {
             host,
             port,
             disable_dns_rebinding_protection,
+            session_idle_timeout,
         })
     }
 }
@@ -202,6 +222,27 @@ fn parse_transport(transport_str: &str) -> anyhow::Result<Transport> {
             other
         ),
     }
+}
+
+/// Kept explicit rather than inherited from rmcp so an SDK default change
+/// cannot silently alter the public default.
+const DEFAULT_SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+
+const INVALID_SESSION_IDLE_TIMEOUT: &str = "MCP_SESSION_IDLE_TIMEOUT_SECS must be a non-negative \
+     integer number of seconds (0 disables the timeout)";
+
+/// Parse `MCP_SESSION_IDLE_TIMEOUT_SECS`; `Ok(None)` disables expiry.
+/// Invalid values are errors: falling back to the default would silently
+/// re-enable expiry for a deployment that asked to disable it.
+fn parse_session_idle_timeout(raw: Option<&str>) -> anyhow::Result<Option<Duration>> {
+    let Some(raw) = raw else {
+        return Ok(Some(DEFAULT_SESSION_IDLE_TIMEOUT));
+    };
+    let seconds: u64 = raw
+        .trim()
+        .parse()
+        .map_err(|_| anyhow::anyhow!(INVALID_SESSION_IDLE_TIMEOUT))?;
+    Ok((seconds > 0).then_some(Duration::from_secs(seconds)))
 }
 
 /// Build the list of allowed hosts for DNS rebinding protection.
@@ -310,5 +351,35 @@ mod tests {
         let hosts = build_allowed_hosts("myserver.example.com");
         assert!(hosts.contains(&"myserver.example.com".to_string()));
         assert_eq!(hosts.len(), 4);
+    }
+
+    #[test]
+    fn parse_session_idle_timeout_values() {
+        let cases = [
+            (None, Some(Duration::from_secs(300))),
+            (Some("0"), None),
+            (Some("3600"), Some(Duration::from_secs(3600))),
+            (Some(" 600 "), Some(Duration::from_secs(600))),
+        ];
+        for (raw, expected) in cases {
+            assert_eq!(
+                parse_session_idle_timeout(raw).unwrap(),
+                expected,
+                "{raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_session_idle_timeout_invalid_values() {
+        // The last value exceeds u64::MAX and must not fall back to the default.
+        for raw in ["off", "-1", "1.5", "", " ", "18446744073709551616"] {
+            let err = parse_session_idle_timeout(Some(raw)).unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains("MCP_SESSION_IDLE_TIMEOUT_SECS"),
+                "{raw:?}: {msg}"
+            );
+        }
     }
 }

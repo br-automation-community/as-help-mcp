@@ -214,6 +214,7 @@ Run `as-help-server --help` for full details.
 | `MCP_HOST` | `127.0.0.1` | Host to bind for streamable-http transport |
 | `MCP_PORT` | `8000` | Port to bind for streamable-http transport |
 | `MCP_DISABLE_DNS_REBINDING_PROTECTION` | `false` | Disable DNS rebinding protection for streamable-http (allows non-loopback hosts) |
+| `MCP_SESSION_IDLE_TIMEOUT_SECS` | `300` | Seconds an idle streamable-http session is kept before it is discarded; 0 disables (only for private, single-client servers) |
 
 ### Embedding Configuration (Environment Variables)
 

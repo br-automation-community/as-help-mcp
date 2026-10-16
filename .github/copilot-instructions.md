@@ -135,6 +135,7 @@ cargo run
 - `MCP_HOST` - Host to bind for streamable-http (default: `127.0.0.1`)
 - `MCP_PORT` - Port for streamable-http (default: `8000`)
 - `MCP_DISABLE_DNS_REBINDING_PROTECTION` - Set `true` to allow non-loopback hosts
+- `MCP_SESSION_IDLE_TIMEOUT_SECS` - Idle streamable-http session timeout in seconds (default: `300`); `0` disables it only for private, single-client servers. Ignored for stdio.
 
 ### Embedding Variables (Optional)
 
