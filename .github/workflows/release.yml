@@ -21,6 +21,18 @@ jobs:
       - name: Install protoc
         uses: arduino/setup-protoc@v3
 
+      # Cargo.toml is not bumped per release; stamp the tag so --version and the
+      # MCP serverInfo report the released version.
+      - name: Set version from release tag
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG#v}"
+          sed -i.bak "s/^version = \".*\"/version = \"$version\"/" Cargo.toml && rm Cargo.toml.bak
+          grep -qx "version = \"$version\"" Cargo.toml
+
       - name: Build release binary
         run: cargo build --release
 
@@ -48,6 +60,18 @@ jobs:
 
       - name: Install protoc
         run: brew install protobuf
+
+      # Cargo.toml is not bumped per release; stamp the tag so --version and the
+      # MCP serverInfo report the released version.
+      - name: Set version from release tag
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG#v}"
+          sed -i.bak "s/^version = \".*\"/version = \"$version\"/" Cargo.toml && rm Cargo.toml.bak
+          grep -qx "version = \"$version\"" Cargo.toml
 
       - name: Build release binary
         run: cargo build --release
