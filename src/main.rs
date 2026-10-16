@@ -132,7 +132,13 @@ async fn main() -> anyhow::Result<()> {
                 StreamableHttpServerConfig, StreamableHttpService,
                 session::local::LocalSessionManager,
             };
-            let session_manager = Arc::new(LocalSessionManager::default());
+            let mut session_manager = LocalSessionManager::default();
+            session_manager.session_config.keep_alive = config.session_idle_timeout;
+            match config.session_idle_timeout {
+                Some(timeout) => info!("MCP session idle timeout: {}s", timeout.as_secs()),
+                None => info!("MCP session idle timeout is DISABLED"),
+            }
+            let session_manager = Arc::new(session_manager);
 
             let config_http = if config.disable_dns_rebinding_protection {
                 info!("DNS rebinding protection is DISABLED");
