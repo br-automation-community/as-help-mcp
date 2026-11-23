@@ -6,6 +6,7 @@ mod indexer;
 mod models;
 mod search_engine;
 mod server;
+mod stdio;
 
 use std::sync::Arc;
 
@@ -116,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
             info!("Starting MCP server on stdio transport...");
             let stdin = tokio::io::stdin();
             let stdout = tokio::io::stdout();
-            let server = rmcp::ServiceExt::serve(handler, (stdin, stdout)).await?;
+            let server = rmcp::ServiceExt::serve(handler, stdio::transport(stdin, stdout)).await?;
             // Wait for the server to finish
             server.waiting().await?;
         }

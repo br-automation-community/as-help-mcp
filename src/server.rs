@@ -7,11 +7,12 @@ use std::sync::Arc;
 
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolResult, ContentBlock, GetPromptRequestParams, GetPromptResponse, GetPromptResult,
-    ListPromptsResult, PaginatedRequestParams, Prompt, PromptArgument, PromptMessage, Role,
-    ServerCapabilities, ServerConfig,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, GetPromptRequestParams,
+    GetPromptResponse, GetPromptResult, ListPromptsResult, PaginatedRequestParams, Prompt,
+    PromptArgument, PromptMessage, ProtocolVersion, Role, ServerCapabilities, ServerConfig,
 };
 use rmcp::schemars::{self, JsonSchema};
 use rmcp::service::RequestContext;
@@ -134,7 +135,6 @@ pub struct HelpServer {
     indexer: Arc<HelpContentIndexer>,
     search_engine: Arc<HelpSearchEngine>,
     online_help_base_url: String,
-    #[allow(dead_code)]
     tool_router: ToolRouter<Self>,
 }
 
@@ -563,6 +563,26 @@ impl ServerHandler for HelpServer {
         .with_instructions(SERVER_INSTRUCTIONS)
     }
 
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, McpError> {
+        let call = ToolCallContext::new(self, request, context);
+        // Before 2025-11-25, invalid tool arguments are protocol errors. Use
+        // the typed route before rmcp converts its deserialization error to a result.
+        if call
+            .request_context
+            .protocol_version()
+            .is_some_and(|v| v < ProtocolVersion::V_2025_11_25)
+            && !self.tool_router.is_disabled(call.name())
+            && let Some(route) = self.tool_router.map.get(call.name())
+        {
+            return (route.call)(call).await;
+        }
+        self.tool_router.call(call).await
+    }
+
     // -- Prompts --
 
     async fn list_prompts(
@@ -704,7 +724,8 @@ mod tests {
             let (client_io, server_io) = tokio::io::duplex(64 * 1024);
             tokio::spawn(async move {
                 // As in main.rs, a handshake error ends the server and closes the pipe.
-                if let Ok(running) = server.serve(tokio::io::split(server_io)).await {
+                let (reader, writer) = tokio::io::split(server_io);
+                if let Ok(running) = server.serve(crate::stdio::transport(reader, writer)).await {
                     let _ = running.waiting().await;
                 }
             });
@@ -733,6 +754,26 @@ mod tests {
             assert!(read > 0, "server closed the connection");
             serde_json::from_str(&line).unwrap()
         }
+
+        async fn initialize(&mut self, version: &str) {
+            self.send(json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": version, "capabilities": {},
+                    "clientInfo": {"name": "test-client", "version": "0.0.0"}
+                }
+            }))
+            .await;
+            let init = self.recv().await;
+            assert_eq!(init["id"], 1, "{init}");
+            assert_eq!(init["result"]["protocolVersion"], version, "{init}");
+            assert_eq!(
+                init["result"]["serverInfo"]["name"],
+                "B&R Automation Studio Help Server"
+            );
+            self.send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+                .await;
+        }
     }
 
     fn tool_names(response: &Value) -> Vec<&str> {
@@ -757,34 +798,71 @@ mod tests {
         assert_eq!(probe["id"], 0, "{probe}");
         assert!(probe["error"].is_object(), "{probe}");
 
-        client
-            .send(json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2025-11-25",
-                    "capabilities": {},
-                    "clientInfo": {"name": "test-client", "version": "0.0.0"}
-                }
-            }))
-            .await;
-        let init = client.recv().await;
-        assert_eq!(init["id"], 1, "{init}");
-        assert_eq!(
-            init["result"]["serverInfo"]["name"],
-            "B&R Automation Studio Help Server"
-        );
-
-        client
-            .send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
-            .await;
+        client.initialize("2025-11-25").await;
         client
             .send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}))
             .await;
         let tools = client.recv().await;
         assert_eq!(tools["id"], 2, "{tools}");
         assert!(tool_names(&tools).contains(&"search_help"), "{tools}");
+    }
+
+    #[tokio::test]
+    async fn late_discovery_cancellation_allows_initialize() {
+        let mut client = StdioClient::connect().await;
+        // A request rejected for missing metadata does not establish a lifecycle.
+        client
+            .send(json!({"jsonrpc": "2.0", "id": 0, "method": "tools/list"}))
+            .await;
+        assert_eq!(client.recv().await["error"]["code"], -32602);
+        client
+            .send(json!({
+                "jsonrpc": "2.0", "id": "probe", "method": "server/discover",
+                "params": {"_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientCapabilities": {}
+                }}
+            }))
+            .await;
+        client
+            .send(json!({
+                "jsonrpc": "2.0", "method": "notifications/cancelled",
+                "params": {"requestId": "probe"}
+            }))
+            .await;
+        let probe = client.recv().await;
+        assert_eq!(probe["id"], "probe", "{probe}");
+        assert!(probe["result"]["supportedVersions"].is_array(), "{probe}");
+        client.initialize("2025-11-25").await;
+    }
+
+    #[tokio::test]
+    async fn malformed_tool_arguments_use_the_negotiated_error_channel() {
+        for (version, protocol_error) in [
+            ("2024-11-05", true),
+            ("2025-03-26", true),
+            ("2025-06-18", true),
+            ("2025-11-25", false),
+        ] {
+            let mut client = StdioClient::connect().await;
+            client.initialize(version).await;
+            client
+                .send(json!({
+                    "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": {"name": "search_help", "arguments": {}}
+                }))
+                .await;
+            let reply = client.recv().await;
+            assert_eq!(reply["jsonrpc"], "2.0", "{version}: {reply}");
+            assert_eq!(reply["id"], 2, "{version}: {reply}");
+            if protocol_error {
+                assert_eq!(reply["error"]["code"], -32602, "{version}: {reply}");
+                assert!(reply.get("result").is_none(), "{version}: {reply}");
+            } else {
+                assert_eq!(reply["result"]["isError"], true, "{version}: {reply}");
+                assert!(reply.get("error").is_none(), "{version}: {reply}");
+            }
+        }
     }
 
     /// A 2026-07-28 client discovers the server, then calls it without `initialize`.

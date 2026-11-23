@@ -216,6 +216,9 @@ Run `as-help-server --help` for full details.
 | `MCP_DISABLE_DNS_REBINDING_PROTECTION` | `false` | Disable DNS rebinding protection for streamable-http (allows non-loopback hosts) |
 | `MCP_SESSION_IDLE_TIMEOUT_SECS` | `300` | Seconds an idle streamable-http session is kept before it is discarded; 0 disables (only for private, single-client servers). Sessions exist only for clients that connect with `initialize`; MCP 2026-07-28 clients are served without sessions |
 
+On stdio, a client can cancel a `server/discover` probe and fall back to `initialize` on the same connection.
+For `tools/call`, arguments that do not match the tool's input schema return JSON-RPC error `-32602` through MCP 2025-06-18. From MCP 2025-11-25 onward they return a tool result with `isError: true`.
+
 ### Embedding Configuration (Environment Variables)
 
 These are only needed when `--create-embeddings true` is set:
