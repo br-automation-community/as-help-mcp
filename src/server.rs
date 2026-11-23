@@ -9,9 +9,9 @@ use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolResult, Content, GetPromptRequestParams, GetPromptResult, ListPromptsResult,
-    PaginatedRequestParams, Prompt, PromptArgument, PromptMessage, PromptMessageRole,
-    ServerCapabilities, ServerInfo,
+    CallToolResult, ContentBlock, GetPromptRequestParams, GetPromptResponse, GetPromptResult,
+    ListPromptsResult, PaginatedRequestParams, Prompt, PromptArgument, PromptMessage, Role,
+    ServerCapabilities, ServerConfig,
 };
 use rmcp::schemars::{self, JsonSchema};
 use rmcp::service::RequestContext;
@@ -202,7 +202,7 @@ impl HelpServer {
                 "total": 0,
                 "status_message": msg
             });
-            return Ok(CallToolResult::success(vec![Content::json(result)?]));
+            return Ok(CallToolResult::success(vec![ContentBlock::json(result)?]));
         }
 
         let limit = if params.limit == 0 { 5 } else { params.limit };
@@ -284,7 +284,7 @@ impl HelpServer {
             );
         }
 
-        Ok(CallToolResult::success(vec![Content::json(result)?]))
+        Ok(CallToolResult::success(vec![ContentBlock::json(result)?]))
     }
 
     /// Get all top-level categories from the help documentation.
@@ -309,7 +309,7 @@ impl HelpServer {
             "categories": cats,
             "total": cats.len(),
         });
-        Ok(CallToolResult::success(vec![Content::json(result)?]))
+        Ok(CallToolResult::success(vec![ContentBlock::json(result)?]))
     }
 
     /// Browse children of a section in the help tree.
@@ -326,7 +326,7 @@ impl HelpServer {
         let parent = match parent {
             Some(p) => p,
             None => {
-                return Ok(CallToolResult::success(vec![Content::text(format!(
+                return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                     "Section '{}' not found.",
                     params.section_id
                 ))]));
@@ -352,7 +352,7 @@ impl HelpServer {
             "children": child_items,
             "total": child_items.len(),
         });
-        Ok(CallToolResult::success(vec![Content::json(result)?]))
+        Ok(CallToolResult::success(vec![ContentBlock::json(result)?]))
     }
 
     /// Get the COMPLETE content of a help page.
@@ -369,7 +369,7 @@ impl HelpServer {
         let page = match self.indexer.get_page_by_id(&params.page_id) {
             Some(p) => p.clone(),
             None => {
-                return Ok(CallToolResult::success(vec![Content::text(format!(
+                return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                     "Page '{}' not found.",
                     params.page_id
                 ))]));
@@ -410,7 +410,7 @@ impl HelpServer {
             "plain_text": plain_text,
             "breadcrumb": breadcrumb,
         });
-        Ok(CallToolResult::success(vec![Content::json(result)?]))
+        Ok(CallToolResult::success(vec![ContentBlock::json(result)?]))
     }
 
     /// Retrieve a help page by its numeric HelpID.
@@ -426,7 +426,7 @@ impl HelpServer {
         let page = match self.indexer.get_page_by_help_id(&params.help_id) {
             Some(p) => p.clone(),
             None => {
-                return Ok(CallToolResult::success(vec![Content::text(format!(
+                return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                     "No page found for HelpID '{}'.",
                     params.help_id
                 ))]));
@@ -467,7 +467,7 @@ impl HelpServer {
             "plain_text": plain_text,
             "breadcrumb": breadcrumb,
         });
-        Ok(CallToolResult::success(vec![Content::json(result)?]))
+        Ok(CallToolResult::success(vec![ContentBlock::json(result)?]))
     }
 
     /// Get detailed navigation breadcrumb for a help page.
@@ -492,7 +492,7 @@ impl HelpServer {
                 })
             })
             .collect();
-        Ok(CallToolResult::success(vec![Content::json(items)?]))
+        Ok(CallToolResult::success(vec![ContentBlock::json(items)?]))
     }
 
     /// Check index build progress and get content statistics.
@@ -539,7 +539,7 @@ impl HelpServer {
             result["index_status"]["error"] = serde_json::json!(err);
         }
 
-        Ok(CallToolResult::success(vec![Content::json(result)?]))
+        Ok(CallToolResult::success(vec![ContentBlock::json(result)?]))
     }
 }
 
@@ -549,8 +549,8 @@ impl HelpServer {
 
 #[tool_handler]
 impl ServerHandler for HelpServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_prompts()
@@ -571,7 +571,6 @@ impl ServerHandler for HelpServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, McpError> {
         Ok(ListPromptsResult {
-            meta: None,
             prompts: vec![
                 Prompt::new(
                     "help_search",
@@ -596,7 +595,7 @@ impl ServerHandler for HelpServer {
                     ]),
                 ),
             ],
-            next_cursor: None,
+            ..Default::default()
         })
     }
 
@@ -604,7 +603,7 @@ impl ServerHandler for HelpServer {
         &self,
         request: GetPromptRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<GetPromptResult, McpError> {
+    ) -> Result<GetPromptResponse, McpError> {
         let topic = request
             .arguments
             .as_ref()
@@ -613,10 +612,10 @@ impl ServerHandler for HelpServer {
             .unwrap_or("<topic>")
             .to_string();
 
-        match request.name.as_str() {
+        let result = match request.name.as_str() {
             "help_search" => Ok(GetPromptResult::new(vec![
                 PromptMessage::new_text(
-                    PromptMessageRole::User,
+                    Role::User,
                     format!(
                         "Search the B&R Automation Studio help documentation comprehensively for: \"{topic}\"\n\n\
                          ## Instructions\n\n\
@@ -629,7 +628,7 @@ impl ServerHandler for HelpServer {
             ]).with_description("Search B&R help documentation")),
             "help_details" => Ok(GetPromptResult::new(vec![
                 PromptMessage::new_text(
-                    PromptMessageRole::User,
+                    Role::User,
                     format!(
                         "Perform DEEP RESEARCH on the B&R Automation Studio help documentation for: \"{topic}\"\n\n\
                          ## Research Workflow\n\n\
@@ -646,6 +645,182 @@ impl ServerHandler for HelpServer {
                 format!("Unknown prompt: {}", request.name),
                 None,
             )),
+        };
+        result.map(GetPromptResponse::Complete)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use rmcp::ServiceExt;
+    use serde_json::{Value, json};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream, ReadHalf, WriteHalf};
+
+    use super::*;
+    use crate::config::Transport;
+
+    /// Test client speaking newline-delimited JSON-RPC to a `HelpServer`
+    /// served exactly like the stdio transport in `main.rs`.
+    struct StdioClient {
+        reader: BufReader<ReadHalf<DuplexStream>>,
+        writer: WriteHalf<DuplexStream>,
+        _help_root: tempfile::TempDir,
+    }
+
+    impl StdioClient {
+        async fn connect() -> Self {
+            let help_root = tempfile::tempdir().unwrap();
+            std::fs::write(
+                help_root.path().join("brhelpcontent.xml"),
+                r#"<?xml version="1.0"?><HelpContent></HelpContent>"#,
+            )
+            .unwrap();
+            let indexer = Arc::new(HelpContentIndexer::new(help_root.path(), None).unwrap());
+            let db_path = help_root.path().join(".ashelp_lance");
+            let search_engine = Arc::new(
+                HelpSearchEngine::new(&db_path, indexer.clone(), false, None)
+                    .await
+                    .unwrap(),
+            );
+            let config = AppConfig {
+                help_root: help_root.path().to_path_buf(),
+                db_path,
+                metadata_dir: help_root.path().join(".ashelp_metadata"),
+                force_rebuild: false,
+                as_version: "4".to_string(),
+                online_help_base_url: "https://help.br-automation.com/#/en/4/".to_string(),
+                create_embeddings: false,
+                embedding: None,
+                transport: Transport::Stdio,
+                host: "127.0.0.1".to_string(),
+                port: 8000,
+                disable_dns_rebinding_protection: false,
+                session_idle_timeout: None,
+            };
+            let server = HelpServer::new(indexer, search_engine, &config);
+
+            let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+            tokio::spawn(async move {
+                // As in main.rs, a handshake error ends the server and closes the pipe.
+                if let Ok(running) = server.serve(tokio::io::split(server_io)).await {
+                    let _ = running.waiting().await;
+                }
+            });
+
+            let (reader, writer) = tokio::io::split(client_io);
+            Self {
+                reader: BufReader::new(reader),
+                writer,
+                _help_root: help_root,
+            }
         }
+
+        async fn send(&mut self, message: Value) {
+            let mut line = serde_json::to_vec(&message).unwrap();
+            line.push(b'\n');
+            self.writer.write_all(&line).await.unwrap();
+        }
+
+        async fn recv(&mut self) -> Value {
+            let mut line = String::new();
+            let read =
+                tokio::time::timeout(Duration::from_secs(10), self.reader.read_line(&mut line))
+                    .await
+                    .expect("server did not respond")
+                    .unwrap();
+            assert!(read > 0, "server closed the connection");
+            serde_json::from_str(&line).unwrap()
+        }
+    }
+
+    fn tool_names(response: &Value) -> Vec<&str> {
+        response["result"]["tools"]
+            .as_array()
+            .unwrap_or_else(|| panic!("no tools in {response}"))
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect()
+    }
+
+    /// Issue #8: VS Code probes with a bare `server/discover` before falling
+    /// back to `initialize`. The probe must get an error, not end the server.
+    #[tokio::test]
+    async fn bare_discover_probe_falls_back_to_initialize() {
+        let mut client = StdioClient::connect().await;
+
+        client
+            .send(json!({"jsonrpc": "2.0", "id": 0, "method": "server/discover", "params": {}}))
+            .await;
+        let probe = client.recv().await;
+        assert_eq!(probe["id"], 0, "{probe}");
+        assert!(probe["error"].is_object(), "{probe}");
+
+        client
+            .send(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test-client", "version": "0.0.0"}
+                }
+            }))
+            .await;
+        let init = client.recv().await;
+        assert_eq!(init["id"], 1, "{init}");
+        assert_eq!(
+            init["result"]["serverInfo"]["name"],
+            "B&R Automation Studio Help Server"
+        );
+
+        client
+            .send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+            .await;
+        client
+            .send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}))
+            .await;
+        let tools = client.recv().await;
+        assert_eq!(tools["id"], 2, "{tools}");
+        assert!(tool_names(&tools).contains(&"search_help"), "{tools}");
+    }
+
+    /// A 2026-07-28 client discovers the server, then calls it without `initialize`.
+    #[tokio::test]
+    async fn discover_with_request_metadata_serves_modern_client() {
+        let mut client = StdioClient::connect().await;
+        let meta = json!({
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientCapabilities": {}
+        });
+
+        client
+            .send(json!({
+                "jsonrpc": "2.0",
+                "id": 0,
+                "method": "server/discover",
+                "params": {"_meta": meta}
+            }))
+            .await;
+        let discover = client.recv().await;
+        let versions = discover["result"]["supportedVersions"]
+            .as_array()
+            .unwrap_or_else(|| panic!("no supportedVersions in {discover}"));
+        assert!(versions.contains(&json!("2026-07-28")), "{discover}");
+        assert_eq!(discover["result"]["instructions"], SERVER_INSTRUCTIONS);
+
+        client
+            .send(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {"_meta": meta}
+            }))
+            .await;
+        let tools = client.recv().await;
+        assert_eq!(tools["id"], 1, "{tools}");
+        assert!(tool_names(&tools).contains(&"search_help"), "{tools}");
     }
 }

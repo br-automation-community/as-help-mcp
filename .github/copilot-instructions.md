@@ -56,6 +56,7 @@ This is a **Model Context Protocol (MCP) server** that provides keyword and opti
    - Server instructions guide LLM to make **multiple searches and page retrievals**
    - Uses `#[tool_router]` for tool dispatch and `#[tool_handler]` for ServerHandler
    - Prompt support via `help_search` and `help_details`
+   - **Handshake**: rmcp 3.x answers the MCP 2026-07-28 `server/discover` probe (an error when it lacks `_meta`, so clients fall back to `initialize`) instead of exiting; covered by the stdio handshake tests in `server.rs`
 
 5. **`config.rs`** - CLI + Environment Configuration
    - Uses **clap** for CLI argument parsing
@@ -135,7 +136,7 @@ cargo run
 - `MCP_HOST` - Host to bind for streamable-http (default: `127.0.0.1`)
 - `MCP_PORT` - Port for streamable-http (default: `8000`)
 - `MCP_DISABLE_DNS_REBINDING_PROTECTION` - Set `true` to allow non-loopback hosts
-- `MCP_SESSION_IDLE_TIMEOUT_SECS` - Idle streamable-http session timeout in seconds (default: `300`); `0` disables it only for private, single-client servers. Ignored for stdio.
+- `MCP_SESSION_IDLE_TIMEOUT_SECS` - Idle streamable-http session timeout in seconds (default: `300`); `0` disables it only for private, single-client servers. Ignored for stdio. Only `initialize`-based clients get sessions; MCP 2026-07-28 clients are served without sessions.
 
 ### Embedding Variables (Optional)
 
@@ -165,7 +166,7 @@ The `BuildStrategy` enum has three variants: `Full`, `Incremental`, `None`.
 
 ## Key Dependencies
 
-- `rmcp` - MCP server SDK (tools, prompts, transport)
+- `rmcp` (3.x) - MCP server SDK (tools, prompts, transport, `server/discover` + `initialize` lifecycles)
 - `lancedb` - Vector + FTS database
 - `arrow-array` / `arrow-schema` - Columnar data for LanceDB
 - `quick-xml` - SAX-style XML parsing
